@@ -57,13 +57,36 @@ def test_verbosity_raises_the_limits_and_very_verbose_lifts_them():
     assert limits(2) == Limits(None, None, None, None, traceback=True)
 
 
-def test_parametrized_cases_failing_alike_fold_into_the_first():
+def test_parametrized_cases_failing_alike_fold_into_the_first_by_full_node_id():
     cases = [failure(f"t.py::test_a[{i}]") for i in range(3)]
     assert report_lines(session(*cases), QUIET) == [
         "FAILED t.py::test_a[0]  t.py:3",
-        "  also fails: [1] [2]",
         "  ValueError: bad",
+        "  also fails: t.py::test_a[1]",
+        "  also fails: t.py::test_a[2]",
         "1 failed in 0.50s.",
+    ]
+
+
+def test_a_folded_case_with_a_different_message_shows_its_first_differing_line():
+    cases = [
+        failure(f"t.py::test_a[{i}]", Raised("AssertionError", f"assert {i} == 0\nx"))
+        for i in (1, 2)
+    ]
+    assert report_lines(session(*cases), QUIET)[1:-1] == [
+        "  AssertionError: assert 1 == 0",
+        "  x",
+        "  also fails: t.py::test_a[2]  assert 2 == 0",
+    ]
+
+
+def test_folded_cases_beyond_the_limit_are_counted():
+    cases = [failure(f"t.py::test_a[{i}]") for i in range(4)]
+    lim = Limits(2, 80, 5, 200, traceback=False)
+    assert report_lines(session(*cases), lim)[2:-1] == [
+        "  also fails: t.py::test_a[1]",
+        "  also fails: t.py::test_a[2]",
+        "  ... 1 more case",
     ]
 
 

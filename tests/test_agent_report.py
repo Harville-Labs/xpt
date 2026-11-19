@@ -64,10 +64,12 @@ MIXED_REPORT = [
     "  json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: "
     "line 1 column 2 (char 1)",
     "FAILED test_mixed.py::test_param[0]  test_mixed.py:31",
-    "  also fails: [1] [3] [4]",
     "  > assert x * 2 == x + 2",
     "  AssertionError: assert (0 * 2) == (0 + 2)",
     "  stdout: debug line 0",
+    "  also fails: test_mixed.py::test_param[1]  assert (1 * 2) == (1 + 2)",
+    "  also fails: test_mixed.py::test_param[3]  assert (3 * 2) == (3 + 2)",
+    "  also fails: test_mixed.py::test_param[4]  assert (4 * 2) == (4 + 2)",
     "8 failed, 2 passed in 0.00s. Next: xpt accept 8db2 b4e4",
 ]
 

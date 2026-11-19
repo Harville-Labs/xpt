@@ -262,32 +262,36 @@ When xpt is installed, it replaces pytest's terminal output. Agents read every b
 
 ```
 FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
+  > expect(parse(source), tree)
   a81f  mismatch
   value.operator: "addition" -> "subtraction"
   1 changed, 42 unchanged
 FAILED tests/test_api.py::test_totals  tests/test_api.py:30
-  assert left == right, left -> right:
-  value["total"]: 41 -> 42
+  > assert totals(order) == {"total": 42, "items": 3, "tax": 0, "due": 42}
+  value["total"]: left 41, right 42
   1 changed, 3 unchanged
-FAILED tests/test_io.py::test_load  src/app/io.py:12 in read_config
+FAILED tests/test_io.py::test_load  tests/test_io.py:8 > src/app/io.py:12 read_config
+  > return json.loads(text)
   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+  caused by: FileNotFoundError: [Errno 2] No such file or directory: 'app.toml'
 FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
   also fails: [1] [3] [4]
+  > assert double(x) == x + 2
   AssertionError: assert (0 * 2) == (0 + 2)
   stdout: debug line 0
 7 failed, 2 passed in 0.31s. Next: xpt accept a81f
 ```
 
-- Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
+- Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. When the error is raised in a helper, the header shows the chain of project frames from the test down instead, as `path:line > path:line function`, keeping the first frame and the three nearest the error. The test's own name is left out because the node id has it. The next line is the source line at the deepest frame, after `> `. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
 - An `expect()` failure shows its short id, its status, and the path diff.
-- A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`. Scalars, unsupported values, and other operators keep pytest's explanation.
-- Any other exception is one line, `Type: message`, cut to 200 characters.
+- A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars, unsupported values, and other operators keep pytest's explanation.
+- Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
 - Parametrized cases that fail at the same line with the same kind of error fold into the first case, and `also fails:` lists the rest.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
-- The footer is pytest's counts and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted, or `Next: xpt failures` when none can.
+- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted, or `Next: xpt failures` when none can.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
 - Internal errors, `-x` stops, and other plugins' summary lines still print. Exit codes are pytest's. Under xdist the controller prints one report, and worker status lines are dropped.
-- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, and `failures`. Each failure has its test, phase, location, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`.
+- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, and `failures`. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`.
 
 The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
 

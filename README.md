@@ -14,6 +14,7 @@ With xpt installed, `pytest` prints one short block per failure and a footer wit
 
 ```
 FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
+  > expect(parse(source), tree)
   a81f  mismatch
   value.operator: "addition" -> "subtraction"
   1 changed, 42 unchanged

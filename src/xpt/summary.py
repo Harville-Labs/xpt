@@ -108,6 +108,8 @@ def _block(f: Failure, cases: Sequence[str], groups: dict[SiteKey, Group], lim: 
     if f.where.source:
         lines.append(f"  > {cut(f.where.source, lim.width)}")
     lines += _detail(f, groups, lim)
+    if f.where.cause:
+        lines.append(f"  caused by: {cut(f.where.cause, lim.message)}")
     for stream, text in f.output:
         lines += [f"  {stream}: {cut(line, lim.width)}" for line in _tail(text, lim.output)]
     if lim.traceback and f.traceback:

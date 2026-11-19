@@ -144,6 +144,44 @@ def test_parse():
     ]
 
 
+@pytest.mark.parametrize(
+    ("raise_line", "cause"),
+    [
+        ('raise ValueError("no id") from error', "  caused by: KeyError: 'id'"),
+        ('raise ValueError("no id")', "  caused by: KeyError: 'id'"),
+        ('raise ValueError("no id") from None', None),
+    ],
+    ids=["explicit", "implicit", "suppressed"],
+)
+def test_a_chained_exception_shows_its_cause(
+    pytester: pytest.Pytester, raise_line: str, cause: str | None
+):
+    source = f"""\
+def load(data):
+    try:
+        return data["id"]
+    except KeyError as error:
+        {raise_line}
+
+def test_load():
+    load({{}})
+"""
+    result = run(pytester, test_cause=source)
+    expected = [
+        "FAILED test_cause.py::test_load  test_cause.py:8 > test_cause.py:5 load",
+        f"  > {raise_line}",
+        "  ValueError: no id",
+        *([cause] if cause else []),
+        "1 failed in 0.00s.",
+    ]
+    assert lines(result) == expected
+
+
+def test_the_footer_counts_warnings(pytester: pytest.Pytester):
+    source = "import warnings\n\ndef test_warns():\n    warnings.warn('old', DeprecationWarning)\n"
+    assert lines(run(pytester, test_warns=source)) == ["1 passed, 1 warning in 0.00s."]
+
+
 def test_very_verbose_adds_the_traceback(pytester: pytest.Pytester):
     result = run(pytester, "-vv", test_tb="def test_tb():\n    raise ValueError('boom')\n")
     output = lines(result)
@@ -296,6 +334,7 @@ def test_ok():
         "function": None,
         "callers": [],
         "source": 'expect({"a": 1, "b": "x" * 300}, {"a": 2, "b": "y"})',
+        "cause": None,
         "output": {},
     }
     assert group["status"] == "mismatch"

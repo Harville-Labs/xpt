@@ -52,8 +52,8 @@ MIXED_REPORT = [
     '  value["age"]: 37 -> 36',
     "  1 changed, 1 unchanged",
     "FAILED test_mixed.py::test_assert_dict  test_mixed.py:20",
-    "  assert left == right, left -> right:",
-    '  value["b"][2]: 3 -> 4',
+    "  assert left == right:",
+    '  value["b"][2]: left 3, right 4',
     "  1 changed, 3 unchanged",
     "FAILED test_mixed.py::test_helper_raises  test_mixed.py:8 in parse",
     "  json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: "

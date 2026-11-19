@@ -97,7 +97,7 @@ def pytest_assertrepr_compare(
     config.stash[_COMPARED] = (a, b)
     lim = limits(config.get_verbosity())
     summary = f"{report.show(a, 40)} == {report.show(b, 40)}"
-    return [summary, *report.changes(found, limit=lim.changes, width=lim.width)]
+    return [summary, *report.changes(found, limit=lim.changes, width=lim.width, labeled=True)]
 
 
 @pytest.hookimpl(wrapper=True)

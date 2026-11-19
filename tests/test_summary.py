@@ -92,12 +92,15 @@ def test_text_detail_prefers_pytest_error_lines():
     assert lines[1:-1] == ["  E   ModuleNotFoundError: nope"]
 
 
-def test_a_compared_assert_shows_the_path_diff():
-    detail = Compared(Dict(((Str("a"), Int(1)),)), Dict(((Str("a"), Int(2)),)))
-    assert report_lines(session(failure(detail=detail)), QUIET)[1:-1] == [
-        "  assert left == right, left -> right:",
-        '  value["a"]: 1 -> 2',
-        "  1 changed, 0 unchanged",
+def test_a_compared_assert_labels_each_side_instead_of_an_arrow():
+    left = Dict(((Str("a"), Int(1)), (Str("b"), Int(3))))
+    right = Dict(((Str("a"), Int(2)), (Str("c"), Int(4))))
+    assert report_lines(session(failure(detail=Compared(left, right))), QUIET)[1:-1] == [
+        "  assert left == right:",
+        '  value["a"]: left 1, right 2',
+        '  value["b"]: left 3, right missing',
+        '  value["c"]: left missing, right 4',
+        "  3 changed, 0 unchanged",
     ]
 
 

@@ -60,10 +60,10 @@ def _container(obj: object, path: Path, active: set[int]) -> Value:
                 key = _serialize(k, path, active)
                 pairs.append((key, _serialize(v, (*path, Key(key)), active)))
             return Dict(tuple(pairs))
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return _dataclass(obj, path, active)
     if adapter := adapters.find(exact):
         return adapter(obj, path, lambda o, p: _serialize(o, p, active))
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return _dataclass(obj, path, active)
     raise UnsupportedValue(path, f"is a {type_name(exact)}")
 
 

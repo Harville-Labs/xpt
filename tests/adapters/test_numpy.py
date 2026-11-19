@@ -56,11 +56,6 @@ def test_datetime_arrays_are_unsupported_with_the_dtype_named():
         serialize(np.array(["2026-01-01"], dtype="datetime64[D]"))
 
 
-def test_arrays_larger_than_the_inline_limit_are_unsupported():
-    with pytest.raises(UnsupportedValue, match="10001 elements"):
-        serialize(np.zeros(10001))
-
-
 def test_equal_arrays_pass_expect_even_inside_containers():
     expect(np.array([1, 2]), np.array([1, 2]))
     expect({"a": [np.array([1, 2])]}, {"a": [np.array([1, 2])]})

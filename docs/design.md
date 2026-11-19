@@ -283,7 +283,7 @@ Comparison is `==` everywhere except for arrays, tensors, and pandas objects, wh
 
 A value an adapter cannot express as one constructor call is wrapped in an xpt helper reached through `expect`, such as `expect.with_extensions(msg, extensions={...})` for protobuf extensions. Its type id is `xpt:expect.with_extensions`, so a file that imports `expect` already has the name.
 
-Arrays over 10,000 elements are refused rather than written inline. A summary with a hash and a mismatch count with the first differing indices remain open.
+Arrays over 10,000 elements are written as `expect.digest(...)`, the same kind of helper. A digest compares on kind, shape, dtype, device, and the sha256 of the little-endian, C-order bytes. Its `min`, `max`, and `mean` fields are only for the reader, so an edit to them never changes the verdict. A failure on an array of the same shape adds one line with the count of differing elements and the largest difference, computed by the diff walker from the changes it already found.
 
 Acceptance never runs code from the record. It builds source text from the `Value` tree. It never calls `eval`, `pickle`, or the observed object's `__repr__`.
 
@@ -396,6 +396,6 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M1. Core assertion.** `Value`, `serialize`, `diff`, `to_source` for builtins and dataclasses. `expect()` compares and raises with the compact message. No recording yet.
 - **M2. Record and accept.** Call-site identity, JSON Lines recorder, `failures` / `show` / `accept` / `reject` / `clean`, fingerprint checks, atomic multi-edit writes, `--expect-create`. This is the differentiator and the MVP line.
 - **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests.
-- **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic, attrs, and protobuf adapters are done. Tolerances (`atol=`, `rtol=`) are done. Large-array summaries and an xdist test matrix remain.
+- **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic, attrs, and protobuf adapters are done. Tolerances (`atol=`, `rtol=`) are done. Large-array digests and mismatch counts are done. An xdist test matrix remains.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **M6. Release.** Name check, docs, PyPI.

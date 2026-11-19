@@ -5,6 +5,7 @@ from types import FrameType
 
 from xpt import record, report
 from xpt.diff import diff
+from xpt.digest import Digest
 from xpt.equal import equal
 from xpt.extensions import with_extensions
 from xpt.record import Observation, Status
@@ -27,6 +28,7 @@ class ExpectationFailed(AssertionError):
 class Expect:
     """`expect` itself, with the helpers that recorded values call as `expect.<name>`."""
 
+    digest = Digest
     with_extensions = staticmethod(with_extensions)
 
     def __call__(

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from xpt.path import Index, Key, Path, field_path
+from xpt.path import Attr, Index, Key, Path, field_path
 from xpt.tolerance import EXACT, Tolerance
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Ref, Seq, Set, Str, Value
 
@@ -18,15 +19,30 @@ class Change:
 
 
 @dataclass(frozen=True, slots=True)
+class ArrayCount:
+    """How many elements of one array or tensor differ, and where the largest difference is."""
+
+    path: Path
+    differ: int
+    total: int
+    largest: float | None
+    at: Path | None
+
+
+@dataclass(frozen=True, slots=True)
 class Diff:
     changes: tuple[Change, ...]
     unchanged: int
+    arrays: tuple[ArrayCount, ...] = ()
+
+
+_ARRAYS = frozenset({"numpy:array", "torch:tensor"})
 
 
 def diff(expected: Value, actual: Value, tol: Tolerance = EXACT) -> Diff:
     walk = _Walk(tol)
     walk.compare(expected, actual, ())
-    return Diff(tuple(walk.changes), walk.unchanged)
+    return Diff(tuple(walk.changes), walk.unchanged, tuple(walk.arrays))
 
 
 def norm(value: Value) -> Hashable:
@@ -68,6 +84,7 @@ class _Walk:
     tol: Tolerance
     changes: list[Change] = field(default_factory=list)
     unchanged: int = 0
+    arrays: list[ArrayCount] = field(default_factory=list)
 
     def compare(self, e: Value, a: Value, path: Path) -> None:
         if norm(e) == norm(a) or (self.tol and _close(e, a, self.tol)):
@@ -107,11 +124,44 @@ class _Walk:
                     if av is None:
                         self.changes.append(Change(field_path(path, name), "remove", ev, None))
                     else:
+                        before = len(self.changes)
                         self.compare(ev, av, field_path(path, name))
+                        if not name and et in _ARRAYS:
+                            self._count(path, ev, self.changes[before:])
                 for name, av in theirs_fields.items():
                     self.changes.append(Change(field_path(path, name), "add", None, av))
             case _:
                 self.changes.append(Change(path, "replace", e, a))
+
+    def _count(self, path: Path, items: Value, changes: list[Change]) -> None:
+        if any(c.op != "replace" for c in changes):
+            return
+        differ = len({_element(c.path) for c in changes})
+        if differ < 2:
+            return
+        gaps = [(g, c.path) for c in changes if (g := _gap(c)) is not None]
+        largest, at = max(gaps, key=lambda gap: gap[0]) if gaps else (None, None)
+        self.arrays.append(ArrayCount(path, differ, _elements(items), largest, at))
+
+
+def _element(path: Path) -> Path:
+    while path and isinstance(path[-1], Attr):
+        path = path[:-1]
+    return path
+
+
+def _elements(value: Value) -> int:
+    if isinstance(value, Seq):
+        return sum(_elements(i) for i in value.items)
+    return 1
+
+
+def _gap(c: Change) -> float | None:
+    match c.expected, c.actual:
+        case (Float() | Int() as e, Float() | Int() as a):
+            gap = abs(float(a.v) - float(e.v))
+            return None if math.isnan(gap) else gap
+    return None
 
 
 def _close(e: Value, a: Value, tol: Tolerance) -> bool:

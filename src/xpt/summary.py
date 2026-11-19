@@ -4,6 +4,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from xpt.decisions import Rejection, mark
 from xpt.diff import Diff, diff
 from xpt.failure import Compared, Expected, Failure, Raised, Text, Where, where_json
 from xpt.group import Group, group
@@ -48,16 +49,18 @@ class Session:
     seconds: float
     exit_code: int
     run: str | None
+    rejected: frozenset[Rejection] = frozenset()
 
 
-def expect_groups(failures: Sequence[Failure]) -> dict[SiteKey, Group]:
-    observations = [d.observation for f in failures if isinstance(d := f.where.detail, Expected)]
-    groups = group(observations)
+def expect_groups(session: Session) -> dict[SiteKey, Group]:
+    found = session.failures
+    observations = [d.observation for f in found if isinstance(d := f.where.detail, Expected)]
+    groups = mark(group(observations), session.rejected)
     return {g.site.key: g for g in groups if not isinstance(g.site, Unlocatable)}
 
 
 def report_lines(session: Session, lim: Limits) -> Lines:
-    groups = expect_groups(session.failures)
+    groups = expect_groups(session)
     lines: Lines = []
     for first, cases in _entries(session.failures):
         lines += _block(first, cases, groups, lim)
@@ -71,7 +74,7 @@ def footer(session: Session, groups: dict[SiteKey, Group]) -> str:
         isinstance(f.where.detail, Expected) for f in session.failures
     ):
         return line
-    ids = sorted(g.id for g in groups.values() if g.acceptable and g.id is not None)
+    ids = sorted(g.id for g in groups.values() if g.offered and g.id is not None)
     if ids:
         return f"{line} Next: xpt accept {' '.join(ids)}"
     return f"{line} Next: xpt failures"
@@ -140,7 +143,8 @@ def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
             o = detail.observation
             site = o.site
             g = None if isinstance(site, Unlocatable) else groups.get(site.key)
-            lines = [f"  {(g.id if g else None) or '-'}  {g.status if g else o.status}"]
+            rejected = "  rejected" if g and g.rejected else ""
+            lines = [f"  {(g.id if g else None) or '-'}  {g.status if g else o.status}{rejected}"]
             if o.expected is not None and o.actual is not None:
                 return lines + _changes(diff(o.expected, o.actual), lim)
             if o.actual is not None:
@@ -187,7 +191,7 @@ def _tail(text: str, limit: int | None) -> list[str]:
 
 
 def report_json(session: Session) -> dict[str, Json]:
-    groups = expect_groups(session.failures)
+    groups = expect_groups(session)
     return {
         "schema_version": SCHEMA_VERSION,
         "exit_code": session.exit_code,

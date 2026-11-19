@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import render
+from xpt import decisions, render
 from xpt.accept import AcceptError, accept, lock
 from xpt.group import Group, group
 from xpt.record import (
@@ -48,7 +48,7 @@ class _Run:
 
 
 def _load(root: Path, run: str | None) -> _Run:
-    groups = group(load_run(root, run))
+    groups = decisions.mark(group(load_run(root, run)), decisions.load_rejections(root))
     return _Run(run or latest_run(root), groups, f" --run {run}" if run else "")
 
 
@@ -92,9 +92,10 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
         raise UsageError("give ids, --missing, or --all, not more than one.")
     run = _load(root, args.run)
     if args.all:
-        groups, target = list(run.groups), "--all"
+        groups, target = [g for g in run.groups if not g.rejected], "--all"
     elif args.missing:
-        groups, target = [g for g in run.groups if g.status == "missing"], "--missing"
+        groups = [g for g in run.groups if g.status == "missing" and not g.rejected]
+        target = "--missing"
     else:
         groups, target = _pick(run, args.ids), " ".join(args.ids)
     data: dict[str, Json] = {"run": run.id, "dry_run": args.dry_run}
@@ -112,6 +113,16 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
 
 def _accepted(outcomes: list[Json], changed: Sequence[str]) -> dict[str, Json]:
     return {"outcomes": outcomes, "changed": list(changed)}
+
+
+def reject(args: argparse.Namespace, root: Path) -> Output:
+    run = _load(root, args.run)
+    outcomes = decisions.reject(root, run.id, _pick(run, args.ids))
+    return Output(
+        1 if any(o.status == "skipped" for o in outcomes) else 0,
+        render.reject_lines(outcomes),
+        {"run": run.id, "outcomes": [render.outcome_json(o) for o in outcomes]},
+    )
 
 
 def runs(args: argparse.Namespace, root: Path) -> Output:
@@ -147,7 +158,9 @@ def _parser() -> argparse.ArgumentParser:
     picked = _Parser(add_help=False)
     picked.add_argument("--run", help="a run id from xpt runs (default: the latest run)")
 
-    parser = _Parser(prog="xpt", description="Review and accept recorded expect() failures.")
+    parser = _Parser(
+        prog="xpt", description="Review, accept, and reject recorded expect() failures."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     def add(name: str, handler: Command, help: str, *parents: _Parser) -> argparse.ArgumentParser:
@@ -164,6 +177,8 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--all", action="store_true", help="every acceptable call site")
     sub.add_argument("--missing", action="store_true", help="only empty expectations")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub = add("reject", reject, "record actual values as bugs, never to be offered", picked)
+    sub.add_argument("ids", nargs="+", metavar="id")
     add("runs", runs, "list recorded runs")
     add("clean", clean, "delete .xpt/ and every recorded value")
     return parser

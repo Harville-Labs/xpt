@@ -1,6 +1,7 @@
-"""The programmatic surface of xpt for tools: read a run, group it, accept groups."""
+"""The programmatic surface of xpt for tools: read a run, group it, accept or reject groups."""
 
 from xpt.accept import AcceptError, AcceptResult, accept
+from xpt.decisions import Rejection, RejectOutcome, RejectStatus, load_rejections, mark, reject
 from xpt.diff import Change, Diff, diff
 from xpt.group import Group, GroupStatus, group
 from xpt.path import format_path
@@ -21,6 +22,9 @@ __all__ = [
     "Outcome",
     "OutcomeStatus",
     "RecordError",
+    "RejectOutcome",
+    "RejectStatus",
+    "Rejection",
     "Status",
     "Unlocatable",
     "Value",
@@ -30,7 +34,10 @@ __all__ = [
     "from_json",
     "group",
     "latest_run",
+    "load_rejections",
     "load_run",
+    "mark",
+    "reject",
     "run_ids",
     "to_json",
 ]

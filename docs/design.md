@@ -212,7 +212,7 @@ Limits: at most 10 changes per expectation, and values longer than 80 characters
 
 ### Session report
 
-With `--xpt-report=agent` (or `XPT_REPORT=agent`), the pytest plugin replaces the whole terminal report, not only `expect()` failures. Tracked in #11.
+The pytest plugin replaces the whole terminal report by default, not only `expect()` failures. The report stays readable for people, and agents run plain `pytest`, so an opt-in flag would miss most agent runs. `--xpt-report=pytest` (or `XPT_REPORT=pytest`) restores pytest's own output. Tracked in #11.
 
 ```
 FAILED test_mixed.py::test_assert_dict  test_mixed.py:8
@@ -236,8 +236,6 @@ For that suite, `pytest -q --tb=short` prints 59 lines and 3.1 KB. The rules:
 - Captured output appears only for failing tests, as at most the last 5 lines per stream.
 - No session header, progress dots, separator rules, or warnings summary. The footer is one line.
 - `--xpt-json PATH` writes the same report, untruncated, with `"schema_version": 1`.
-
-Whether the session report turns on by default when an agent harness is detected is open, and is decided in #11.
 
 ### CLI
 
@@ -271,7 +269,7 @@ expect(actual, expected)          # compares with ==, records on mismatch
 
 Later, as keyword-only arguments: `ignore=`, `unordered=`, `atol=`, `rtol=`, `key=`. These stay in the source, so a reviewer can see them.
 
-pytest plugin options: `--expect-create`, `--expect-no-record`, `--xpt-report=agent|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-no-record`, `--xpt-report=pytest` to opt out, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 

@@ -79,7 +79,7 @@ def test_a_shared_reference_is_not_a_cycle():
 def test_a_cycle_is_unsupported_and_names_the_path():
     loop: list[object] = [1]
     loop.append({"next": loop})
-    with pytest.raises(UnsupportedValue, match=r"value\[1\]\['next'\] contains itself"):
+    with pytest.raises(UnsupportedValue, match=r'value\[1\]\["next"\] contains itself'):
         serialize(loop)
 
 
@@ -87,7 +87,7 @@ def test_an_unsupported_type_names_the_path_and_the_type():
     with pytest.raises(UnsupportedValue) as e:
         serialize({"handler": print})
     assert str(e.value) == (
-        "value['handler'] is a builtins:builtin_function_or_method; xpt cannot record it. "
+        'value["handler"] is a builtins:builtin_function_or_method; xpt cannot record it. '
         "Register an adapter or expect a field of it instead."
     )
 

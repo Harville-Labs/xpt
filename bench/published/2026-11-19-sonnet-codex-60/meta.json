@@ -1,0 +1,28 @@
+{
+  "started_at": "2026-11-19T19:18:37+00:00",
+  "args": {
+    "agents": "claude:sonnet,codex:default",
+    "variants": "xpt,stock",
+    "tasks": "all",
+    "reps": 5,
+    "xpt": "HEAD",
+    "jobs": 4,
+    "timeout": 1800,
+    "out": "bench/results/20261119-sweep60",
+    "workroot": null,
+    "keep_workdirs": false
+  },
+  "xpt": {
+    "source": "HEAD",
+    "commit": "59b1c9b4e3af95f72d5950f5358921cdb80dfee8",
+    "sha256": "e6b6e9ae586f11501757890814a36485e87b79e9997588e65d185d004aa1c946"
+  },
+  "wheel": "xpt-0.2.0-py3-none-any.whl",
+  "agents": {
+    "claude": "2.1.292 (Claude Code)",
+    "codex": "codex-cli 0.160.1"
+  },
+  "uv": "uv 0.13.6 (329bf9448 2026-10-26 aarch64-apple-darwin)",
+  "python": "3.13.13",
+  "platform": "macOS-27.2.1-arm64-arm-64bit-Mach-O"
+}

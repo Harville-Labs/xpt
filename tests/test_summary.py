@@ -7,6 +7,7 @@ from xpt.failure import (
     Detail,
     Expected,
     Failure,
+    Frame,
     Raised,
     Text,
     Where,
@@ -96,7 +97,6 @@ def test_a_compared_assert_labels_each_side_instead_of_an_arrow():
     left = Dict(((Str("a"), Int(1)), (Str("b"), Int(3))))
     right = Dict(((Str("a"), Int(2)), (Str("c"), Int(4))))
     assert report_lines(session(failure(detail=Compared(left, right))), QUIET)[1:-1] == [
-        "  assert left == right:",
         '  value["a"]: left 1, right 2',
         '  value["b"]: left 3, right missing',
         '  value["c"]: left missing, right 4',
@@ -139,6 +139,30 @@ def test_output_shows_the_last_lines_of_each_stream_and_very_verbose_the_traceba
     ]
 
 
+def test_the_header_shows_the_call_chain_from_the_test_down():
+    callers = (Frame("t.py", 9, None), Frame("t.py", 5, "outer"))
+    f = failure(where=Where("t.py", 2, "inner", Raised("ValueError", "bad"), callers))
+    assert report_lines(session(f), QUIET)[0] == (
+        "FAILED t.py::test_a  t.py:9 > t.py:5 outer > t.py:2 inner"
+    )
+
+
+def test_a_long_call_chain_keeps_the_test_and_the_frames_nearest_the_error():
+    callers = tuple(Frame("t.py", i, f"f{i}") for i in range(10, 16))
+    f = failure(where=Where("t.py", 2, "inner", Raised("ValueError", "bad"), callers))
+    assert report_lines(session(f), QUIET)[0] == (
+        "FAILED t.py::test_a  t.py:10 f10 > ... > t.py:14 f14 > t.py:15 f15 > t.py:2 inner"
+    )
+
+
+def test_the_failing_source_line_is_shown_and_cut():
+    where = Where("t.py", 3, None, Raised("ValueError", "bad"), source="x = " + "1" * 100)
+    assert report_lines(session(failure(where=where)), QUIET)[1:3] == [
+        f"  > x = {'1' * 76}... (104 chars)",
+        "  ValueError: bad",
+    ]
+
+
 def test_a_collection_error_header_does_not_repeat_the_path():
     f = failure("t.py", when="collect", where=Where("t.py", None, None, Text("E   boom")))
     assert report_lines(session(f), QUIET)[0] == "ERROR t.py (collect)"
@@ -155,13 +179,15 @@ def test_a_collection_error_header_does_not_repeat_the_path():
     ids=["expect", "compare", "raised", "text"],
 )
 def test_where_survives_its_json_round_trip(detail: Detail):
-    where = Where("t.py", 3, "helper", detail)
+    where = Where("t.py", 3, "helper", detail, (Frame("t.py", 9, None),), "helper()")
     assert where_from_json(where_json(where)) == where
 
 
 def test_where_from_json_rejects_an_unknown_detail_kind():
     with pytest.raises(ValueError, match=r'detail\.kind must be "expect"'):
-        where_from_json({"path": "t.py", "line": 1, "function": None, "detail": {"kind": "?"}})
+        where_from_json(
+            {"path": "t.py", "line": 1, "function": None, "callers": [], "detail": {"kind": "?"}}
+        )
 
 
 def test_the_json_report_keeps_values_uncut():

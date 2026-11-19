@@ -45,21 +45,25 @@ def test_ok():
 
 MIXED_REPORT = [
     "FAILED test_mixed.py::test_expect_missing  test_mixed.py:12",
+    '  > expect({"user": "ada"})',
     "  8db2  missing",
     '  actual: {"user": "ada"}',
     "FAILED test_mixed.py::test_expect_mismatch  test_mixed.py:16",
+    '  > expect({"user": "ada", "age": 36}, {"user": "ada", "age": 37})',
     "  b4e4  mismatch",
     '  value["age"]: 37 -> 36',
     "  1 changed, 1 unchanged",
     "FAILED test_mixed.py::test_assert_dict  test_mixed.py:20",
-    "  assert left == right:",
+    '  > assert {"a": 1, "b": [1, 2, 3]} == {"a": 1, "b": [1, 2, 4]}',
     '  value["b"][2]: left 3, right 4',
     "  1 changed, 3 unchanged",
-    "FAILED test_mixed.py::test_helper_raises  test_mixed.py:8 in parse",
+    "FAILED test_mixed.py::test_helper_raises  test_mixed.py:24 > test_mixed.py:8 parse",
+    "  > return json.loads(text)",
     "  json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: "
     "line 1 column 2 (char 1)",
     "FAILED test_mixed.py::test_param[0]  test_mixed.py:31",
     "  also fails: [1] [3] [4]",
+    "  > assert x * 2 == x + 2",
     "  AssertionError: assert (0 * 2) == (0 + 2)",
     "  stdout: debug line 0",
     "8 failed, 2 passed in 0.00s. Next: xpt accept 8db2 b4e4",
@@ -115,15 +119,37 @@ def test_verbose_raises_the_limits(pytester: pytest.Pytester):
     source = "def test_long():\n    raise ValueError('x' * 300)\n"
     quiet = run(pytester, test_long=source)
     verbose = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-v")
-    assert lines(quiet)[1] == f"  ValueError: {'x' * 188}... (312 chars)"
-    assert lines(verbose)[1] == f"  ValueError: {'x' * 300}"
+    assert lines(quiet)[2] == f"  ValueError: {'x' * 188}... (312 chars)"
+    assert lines(verbose)[2] == f"  ValueError: {'x' * 300}"
+
+
+def test_a_failure_in_a_nested_helper_shows_the_project_call_chain(pytester: pytest.Pytester):
+    source = """\
+import json
+
+def load(text):
+    return json.loads(text)
+
+def parse(text):
+    return load(text)
+
+def test_parse():
+    parse("{bad}")
+"""
+    result = run(pytester, test_chain=source)
+    assert lines(result)[:2] == [
+        "FAILED test_chain.py::test_parse  "
+        "test_chain.py:10 > test_chain.py:7 parse > test_chain.py:4 load",
+        "  > return json.loads(text)",
+    ]
 
 
 def test_very_verbose_adds_the_traceback(pytester: pytest.Pytester):
     result = run(pytester, "-vv", test_tb="def test_tb():\n    raise ValueError('boom')\n")
     output = lines(result)
-    assert output[:3] == [
+    assert output[:4] == [
         "FAILED test_tb.py::test_tb  test_tb.py:2",
+        "  > raise ValueError('boom')",
         "  ValueError: boom",
         "  traceback:",
     ]
@@ -145,6 +171,7 @@ def test_noisy():
     result = run(pytester, test_noisy=source)
     assert lines(result) == [
         "FAILED test_noisy.py::test_noisy  test_noisy.py:9",
+        "  > assert 1 > 2",
         "  AssertionError: assert 1 > 2",
         "  stdout: out 3",
         "  stdout: out 4",
@@ -171,6 +198,7 @@ def test_query(db):
     result = run(pytester, test_setup=source)
     assert lines(result) == [
         "ERROR test_setup.py::test_query (setup)  test_setup.py:5 in db",
+        '  > raise RuntimeError("no database")',
         "  RuntimeError: no database",
         "1 error in 0.00s.",
     ]
@@ -266,6 +294,8 @@ def test_ok():
         "path": "test_json.py",
         "line": 4,
         "function": None,
+        "callers": [],
+        "source": 'expect({"a": 1, "b": "x" * 300}, {"a": 2, "b": "y"})',
         "output": {},
     }
     assert group["status"] == "mismatch"

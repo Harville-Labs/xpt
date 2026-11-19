@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import linecache
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ import pytest
 from xpt import record, report
 from xpt.diff import diff
 from xpt.expect import ExpectationFailed
-from xpt.failure import Compared, Detail, Expected, Raised, Text, Where, where_json
+from xpt.failure import Compared, Detail, Expected, Frame, Raised, Text, Where, where_json
 from xpt.serialize import UnsupportedValue, serialize
 from xpt.summary import limits
 from xpt.terminal import AgentReporter, location
@@ -122,27 +123,30 @@ def _where(
     excinfo = call.excinfo
     if excinfo is None:
         return Where(path, None if line is None else line + 1, None, Text(rep.longreprtext))
-    root = item.config.rootpath
-    function = None
-    frame = _project_frame(excinfo, root)
-    if frame is not None:
-        found, line, name = frame
-        path = found.relative_to(root).as_posix()
-        if name != getattr(item, "originalname", item.name):
-            function = name
-    return Where(path, None if line is None else line + 1, function, _detail(excinfo, compared))
+    detail = _detail(excinfo, compared)
+    frames = _project_frames(excinfo, item.config.rootpath)
+    if not frames:
+        return Where(path, None if line is None else line + 1, None, detail)
+    test = getattr(item, "originalname", item.name)
+    *callers, (path, lineno, name, source) = frames
+    chain = tuple(Frame(p, n, None if f == test else f) for p, n, f, _ in callers)
+    return Where(path, lineno, None if name == test else name, detail, chain, source or None)
 
 
-def _project_frame(
+def _project_frames(
     excinfo: pytest.ExceptionInfo[BaseException], root: Path
-) -> tuple[Path, int, str] | None:
-    """The deepest frame in a file under `root` that is not an installed package."""
-    for entry in reversed(excinfo.traceback.filter(excinfo)):
+) -> list[tuple[str, int, str, str]]:
+    """Frames in files under `root` that are not installed packages, outermost first, as
+    (relative path, 1-based line, function, stripped source line)."""
+    frames = []
+    for entry in excinfo.traceback.filter(excinfo):
         path = Path(entry.path)
         inside = path.is_absolute() and path.is_relative_to(root)
         if inside and not _OUTSIDE.intersection(path.relative_to(root).parts):
-            return path, entry.lineno, entry.name
-    return None
+            line = entry.lineno + 1
+            source = linecache.getline(str(path), line).strip()
+            frames.append((path.relative_to(root).as_posix(), line, entry.name, source))
+    return frames
 
 
 def _detail(

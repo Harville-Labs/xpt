@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeVar, cast
 
 from xpt.record import Observation, from_record, to_record
 from xpt.value import Json, Value, from_json, to_json
 
 STREAMS = ("stdout", "stderr", "log")
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,16 +38,26 @@ Detail = Expected | Compared | Raised | Text
 
 
 @dataclass(frozen=True, slots=True)
+class Frame:
+    path: str
+    line: int
+    function: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class Where:
     """Where a test failed: the deepest project frame and what went wrong there.
 
-    `function` is None when the frame is the test function itself.
+    `callers` are the project frames above it, outermost first, and `source` is its
+    stripped source line. A `function` here or in a caller is None for the test itself.
     """
 
     path: str
     line: int | None
     function: str | None
     detail: Detail
+    callers: tuple[Frame, ...] = ()
+    source: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,18 +82,39 @@ def streams(sections: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
 
 
 def where_json(w: Where) -> dict[str, Json]:
-    return {"path": w.path, "line": w.line, "function": w.function, "detail": detail_json(w.detail)}
+    return {
+        "path": w.path,
+        "line": w.line,
+        "function": w.function,
+        "callers": [{"path": f.path, "line": f.line, "function": f.function} for f in w.callers],
+        "source": w.source,
+        "detail": detail_json(w.detail),
+    }
 
 
 def where_from_json(data: object) -> Where:
     record = _object(data, "the xpt report payload")
+    line = _optional(record, "line", int)
+    function = _optional(record, "function", str)
+    callers = record.get("callers")
+    if not isinstance(callers, list):
+        raise ValueError(f"callers must be a list, got {callers!r}.")
+    return Where(
+        _str(record, "path"),
+        line,
+        function,
+        detail_from_json(record.get("detail")),
+        tuple(_frame(c) for c in cast(list[object], callers)),
+        _optional(record, "source", str),
+    )
+
+
+def _frame(data: object) -> Frame:
+    record = _object(data, "a caller")
     line = record.get("line")
-    function = record.get("function")
-    if line is not None and not isinstance(line, int):
-        raise ValueError(f"line must be an integer or null, got {line!r}.")
-    if function is not None and not isinstance(function, str):
-        raise ValueError(f"function must be a string or null, got {function!r}.")
-    return Where(_str(record, "path"), line, function, detail_from_json(record.get("detail")))
+    if not isinstance(line, int):
+        raise ValueError(f"line must be an integer, got {line!r}.")
+    return Frame(_str(record, "path"), line, _optional(record, "function", str))
 
 
 def detail_json(d: Detail) -> dict[str, Json]:
@@ -114,6 +147,13 @@ def _object(data: object, name: str) -> dict[str, object]:
     if not isinstance(data, dict):
         raise ValueError(f"{name} must be a JSON object, got {data!r}.")
     return cast(dict[str, object], data)
+
+
+def _optional(data: dict[str, object], key: str, kind: type[T]) -> T | None:
+    value = data.get(key)
+    if value is not None and not isinstance(value, kind):
+        raise ValueError(f"{key} must be {kind.__name__} or null, got {value!r}.")
+    return value
 
 
 def _str(data: dict[str, object], key: str) -> str:

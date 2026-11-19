@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from xpt.diff import Diff, diff
-from xpt.failure import Compared, Expected, Failure, Raised, Text, where_json
+from xpt.failure import Compared, Expected, Failure, Raised, Text, Where, where_json
 from xpt.group import Group, group
 from xpt.render import change_json, group_json
 from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
@@ -13,6 +13,7 @@ from xpt.site import SiteKey, Unlocatable
 from xpt.value import Json
 
 SCHEMA_VERSION = 1
+MAX_FRAMES = 4
 
 Lines = list[str]
 
@@ -100,17 +101,34 @@ def _kind(f: Failure) -> str:
 def _block(f: Failure, cases: Sequence[str], groups: dict[SiteKey, Group], lim: Limits) -> Lines:
     label = "FAILED" if f.when == "call" else "ERROR"
     phase = "" if f.when == "call" else f" ({f.when})"
-    at = f.where.path if f.where.line is None else f"{f.where.path}:{f.where.line}"
-    where = f" in {f.where.function}" if f.where.function else ""
-    lines = [f"{label} {f.test}{phase}" + ("" if at == f.test else f"  {at}{where}")]
+    at = _at(f.where)
+    lines = [f"{label} {f.test}{phase}" + ("" if at == f.test else f"  {at}")]
     if cases:
         lines.append(f"  also fails: {' '.join(cases)}")
+    if f.where.source:
+        lines.append(f"  > {cut(f.where.source, lim.width)}")
     lines += _detail(f, groups, lim)
     for stream, text in f.output:
         lines += [f"  {stream}: {cut(line, lim.width)}" for line in _tail(text, lim.output)]
     if lim.traceback and f.traceback:
         lines += ["  traceback:", *(f"    {line}" for line in f.traceback.splitlines())]
     return lines
+
+
+def _at(w: Where) -> str:
+    """The failing frame as `path:line`, or the chain of project frames from the test down."""
+    at = w.path if w.line is None else f"{w.path}:{w.line}"
+    if not w.callers:
+        return f"{at} in {w.function}" if w.function else at
+    frames = [_frame(f"{c.path}:{c.line}", c.function) for c in w.callers]
+    frames.append(_frame(at, w.function))
+    if len(frames) > MAX_FRAMES:
+        frames = [frames[0], "...", *frames[1 - MAX_FRAMES :]]
+    return " > ".join(frames)
+
+
+def _frame(at: str, function: str | None) -> str:
+    return f"{at} {function}" if function else at
 
 
 def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
@@ -128,7 +146,7 @@ def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
             return [*lines, f"  {cut(o.detail, lim.message)}"]
         case Compared():
             found = diff(detail.left, detail.right)
-            return ["  assert left == right:", *_changes(found, lim, labeled=True)]
+            return _changes(found, lim, labeled=True)
         case Raised():
             return _raised(detail, lim)
         case Text():

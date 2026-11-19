@@ -244,6 +244,14 @@ def test_the_json_report_keeps_values_uncut():
     detail = Compared(Str("a" * 300), Str("b"))
     data = report_json(session(failure(detail=detail)))
     [entry] = cast(list[dict[str, object]], data["failures"])
+    assert entry["changes"] == [{"path": "value", "op": "replace", "left": "a" * 300, "right": "b"}]
+
+
+def test_a_compared_assert_names_its_json_sides_left_and_right():
+    detail = Compared(Dict(((Str("a"), Int(1)),)), Dict(((Str("b"), Int(2)),)))
+    data = report_json(session(failure(detail=detail)))
+    [entry] = cast(list[dict[str, object]], data["failures"])
     assert entry["changes"] == [
-        {"path": "value", "op": "replace", "expected": "a" * 300, "actual": "b"}
+        {"path": 'value["a"]', "op": "remove", "left": 1},
+        {"path": 'value["b"]', "op": "add", "right": 2},
     ]

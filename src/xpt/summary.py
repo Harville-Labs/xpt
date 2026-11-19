@@ -241,6 +241,6 @@ def _failure_json(f: Failure, groups: dict[SiteKey, Group]) -> dict[str, Json]:
             data["group"] = group_json(g)
     if isinstance(detail, Compared):
         found = diff(detail.left, detail.right)
-        data["changes"] = [change_json(c) for c in found.changes]
+        data["changes"] = [change_json(c, labeled=True) for c in found.changes]
         data["unchanged"] = found.unchanged
     return data

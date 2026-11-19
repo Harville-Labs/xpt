@@ -151,12 +151,14 @@ def group_json(g: Group) -> dict[str, Json]:
     return data
 
 
-def change_json(c: Change) -> dict[str, Json]:
+def change_json(c: Change, *, labeled: bool = False) -> dict[str, Json]:
+    """`labeled` names the sides left and right, for a diff of `assert left == right`."""
+    first, second = ("left", "right") if labeled else ("expected", "actual")
     data: dict[str, Json] = {"path": format_path(c.path), "op": c.op}
     if c.expected is not None:
-        data["expected"] = to_json(c.expected)
+        data[first] = to_json(c.expected)
     if c.actual is not None:
-        data["actual"] = to_json(c.actual)
+        data[second] = to_json(c.actual)
     return data
 
 

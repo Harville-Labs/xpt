@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from xpt.path import Index, Key, Path, field_path
+from xpt.tolerance import EXACT, Tolerance
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Ref, Seq, Set, Str, Value
 
 
@@ -22,8 +23,8 @@ class Diff:
     unchanged: int
 
 
-def diff(expected: Value, actual: Value) -> Diff:
-    walk = _Walk()
+def diff(expected: Value, actual: Value, tol: Tolerance = EXACT) -> Diff:
+    walk = _Walk(tol)
     walk.compare(expected, actual, ())
     return Diff(tuple(walk.changes), walk.unchanged)
 
@@ -64,11 +65,12 @@ def leaves(value: Value) -> int:
 
 @dataclass(slots=True)
 class _Walk:
+    tol: Tolerance
     changes: list[Change] = field(default_factory=list)
     unchanged: int = 0
 
     def compare(self, e: Value, a: Value, path: Path) -> None:
-        if norm(e) == norm(a):
+        if norm(e) == norm(a) or (self.tol and _close(e, a, self.tol)):
             self.unchanged += leaves(a)
             return
         match e, a:
@@ -110,3 +112,10 @@ class _Walk:
                     self.changes.append(Change(field_path(path, name), "add", None, av))
             case _:
                 self.changes.append(Change(path, "replace", e, a))
+
+
+def _close(e: Value, a: Value, tol: Tolerance) -> bool:
+    match e, a:
+        case (Float() | Int(), Float() | Int()) if Float in (type(e), type(a)):
+            return tol.close(float(a.v), float(e.v))
+    return False

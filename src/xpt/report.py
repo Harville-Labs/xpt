@@ -3,6 +3,7 @@ from __future__ import annotations
 from xpt.diff import Change, Diff
 from xpt.path import format_path
 from xpt.source import one_line
+from xpt.tolerance import EXACT, Tolerance
 from xpt.value import Value
 
 MAX_CHANGES = 10
@@ -13,8 +14,9 @@ def missing(actual: Value) -> str:
     return f"expect() has no expected value. Actual: {show(actual)}"
 
 
-def mismatch(result: Diff) -> str:
-    return "\n".join(["expect() mismatch:", *changes(result)])
+def mismatch(result: Diff, tol: Tolerance = EXACT) -> str:
+    header = f"expect() mismatch ({tol.label()}):" if tol else "expect() mismatch:"
+    return "\n".join([header, *changes(result)])
 
 
 def changes(

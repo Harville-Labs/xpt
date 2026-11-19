@@ -10,6 +10,7 @@ from xpt.extensions import with_extensions
 from xpt.record import Observation, Status
 from xpt.serialize import UnsupportedValue, serialize
 from xpt.site import locate
+from xpt.tolerance import Tolerance, tolerance
 from xpt.value import Value
 
 _MISSING = object()
@@ -28,25 +29,35 @@ class Expect:
 
     with_extensions = staticmethod(with_extensions)
 
-    def __call__(self, actual: object, expected: object = _MISSING, *, _depth: int = 0) -> None:
+    def __call__(
+        self,
+        actual: object,
+        expected: object = _MISSING,
+        *,
+        atol: float = 0.0,
+        rtol: float = 0.0,
+        _depth: int = 0,
+    ) -> None:
         """Fail unless `actual == expected`, explaining a mismatch path by path.
 
-        Arrays, tensors, and frames must also match in type, shape, and dtype.
+        Arrays, tensors, and frames must also match in type, shape, and dtype. A float, or a
+        float element, passes within `|actual - expected| <= atol + rtol * |expected|`.
 
         Leaving out `expected` always fails, so a new expectation never passes unreviewed.
         A failure is recorded under `.xpt/` for review. A helper that calls `expect` passes
         `_depth=1` so the record points at the helper's caller.
         """
         __tracebackhide__ = True
-        if expected is not _MISSING and equal(actual, expected):
+        tol = tolerance(atol, rtol)
+        if expected is not _MISSING and equal(actual, expected, tol):
             return
-        _fail(actual, expected, sys._getframe(1 + _depth))
+        _fail(actual, expected, tol, sys._getframe(1 + _depth))
 
 
 expect = Expect()
 
 
-def _fail(actual: object, expected: object, frame: FrameType) -> None:
+def _fail(actual: object, expected: object, tol: Tolerance, frame: FrameType) -> None:
     __tracebackhide__ = True
     rec = record.recorder
 
@@ -54,7 +65,8 @@ def _fail(actual: object, expected: object, frame: FrameType) -> None:
         status: Status, want: Value | None, got: Value | None, detail: str = ""
     ) -> Observation:
         test = rec.test or frame.f_code.co_qualname
-        return Observation(rec.run, test, locate(frame, rec.root), status, want, got, detail)
+        site = locate(frame, rec.root)
+        return Observation(rec.run, test, site, status, want, got, detail, tol)
 
     def save(observation: Observation) -> str:
         try:
@@ -73,7 +85,7 @@ def _fail(actual: object, expected: object, frame: FrameType) -> None:
     if want is None:
         status, message = "missing", report.missing(got)
     else:
-        status, message = "mismatch", report.mismatch(diff(want, got))
+        status, message = "mismatch", report.mismatch(diff(want, got, tol), tol)
     observation = observe(status, want, got)
     note = save(observation)
     raise ExpectationFailed(f"{message}\n{note}" if note else message, observation)

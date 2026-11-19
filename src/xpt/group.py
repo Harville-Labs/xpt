@@ -9,6 +9,7 @@ from xpt.diff import norm
 from xpt.record import Observation
 from xpt.report import show
 from xpt.site import CallSite, SiteKey, Unlocatable, short_ids
+from xpt.tolerance import EXACT, Tolerance
 from xpt.value import Value, canonical
 
 GroupStatus = Literal["missing", "mismatch", "unsupported", "unlocatable", "conflict"]
@@ -36,6 +37,7 @@ class Group:
     tests: tuple[str, ...]
     detail: str
     rejected: bool = False
+    tolerance: Tolerance = EXACT
 
     @property
     def acceptable(self) -> bool:
@@ -77,7 +79,9 @@ def _located(id: str, seen: list[tuple[CallSite, Observation]]) -> Group:
     one_expected = expected[0][0] if len(expected) == 1 else None
 
     def made(status: GroupStatus, detail: str = "") -> Group:
-        return Group(id, site, status, values, one_expected, _tests(observations), detail)
+        tests = _tests(observations)
+        tol = observations[0].tolerance
+        return Group(id, site, status, values, one_expected, tests, detail, tolerance=tol)
 
     if len(sources) > 1:
         shown = [(f"source {sha[:8]}" if sha else "no expected argument", t) for sha, t in sources]

@@ -29,7 +29,7 @@ def observation(run: str, **changes: object) -> Observation:
         "detail": "",
     }
     fields.update(changes)
-    return Observation(**fields)  # type: ignore[arg-type]
+    return Observation(**fields)  # type: ignore
 
 
 def finished(root: Path, run: str, *observations: Observation) -> Recorder:

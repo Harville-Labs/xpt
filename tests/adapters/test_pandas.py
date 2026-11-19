@@ -4,6 +4,7 @@ from support import assert_rebuilds
 from xpt import expect
 from xpt.equal import equal
 from xpt.serialize import UnsupportedValue, serialize
+from xpt.tolerance import Tolerance
 
 pd = pytest.importorskip("pandas")
 
@@ -82,3 +83,16 @@ def test_index_names_take_part_in_equality():
     assert not equal(
         pd.Series([1], index=pd.Index([0], name="a")), pd.Series([1], index=pd.Index([0]))
     )
+
+
+def test_a_float_column_within_atol_passes_but_the_index_stays_exact():
+    expected = pd.DataFrame({"v": [1.0, 2.0]})
+    expect(pd.DataFrame({"v": [1.0, 2.0004]}), expected, atol=1e-3)
+    assert not equal(pd.DataFrame({"v": [1.0, 2.5]}), expected, Tolerance(atol=1e-3))
+    shifted = pd.DataFrame({"v": [1.0, 2.0]}, index=[0, 2])
+    assert not equal(shifted, expected, Tolerance(atol=5))
+
+
+def test_a_series_within_rtol_passes():
+    expect(pd.Series([100.0, 204.0]), pd.Series([100.0, 200.0]), rtol=0.05)
+    assert not equal(pd.Series([1, 2]), pd.Series([1, 3]), Tolerance(atol=5))

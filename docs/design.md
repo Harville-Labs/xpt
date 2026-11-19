@@ -6,6 +6,8 @@ xpt is an inline expect-testing library for Python. A test calls `expect(actual)
 
 It is built for coding agents and must stay just as usable by people. It needs no model, network service, or agent framework.
 
+More and more code is written and reviewed by agents, and an agent reads every byte a test run prints. pytest's output is written for a person at a terminal: progress dots, separator rules, stdlib frames, and the same file path printed three times. xpt aims to be the test library for codebases that agents review: small, exact failure reports, and a machine-readable copy of every one of them.
+
 The guiding question for every decision: does this make writing, running, understanding, or maintaining tests cheaper for a coding agent, without costing correctness or usability for a human?
 
 ## Prior art and where we differ
@@ -196,18 +198,50 @@ Acceptance never runs code from the record. It builds source text from the `Valu
 
 ## Reporting
 
-The terminal report replaces pytest's traceback for expect failures:
+The report is the product. Every line costs an agent context, so each failure says where it happened and what changed, and nothing else.
+
+An `expect()` failure prints one line per change:
 
 ```
-FAILED tests/test_parser.py::test_parser
-  a81f  tests/test_parser.py:14  mismatch
-    expression.operator: "addition" -> "subtraction"
-    1 changed, 42 unchanged
+expect() mismatch:
+  value["expression"]["operator"]: "addition" -> "subtraction"
+  1 changed, 42 unchanged
 ```
 
-Limits: at most 10 changes per expectation, and values longer than 80 characters are cut with a length marker. `xpt show` lifts both limits. The session footer prints one line: `3 expectations failed (2 mismatch, 1 missing). xpt failures for details.`
+Limits: at most 10 changes per expectation, and values longer than 80 characters are cut with a length marker. `xpt show` lifts both limits.
 
-JSON is the same data with `"schema_version": 1`. Every CLI command takes `--json`. The CLI handlers are thin wrappers over a Python API (`xpt.api.failures()`, `show()`, `accept()`), so an MCP server later is a fourth thin wrapper and not a redesign.
+### Session report
+
+With `--xpt-report=agent` (or `XPT_REPORT=agent`), the pytest plugin replaces the whole terminal report, not only `expect()` failures. Tracked in #11.
+
+```
+FAILED test_mixed.py::test_assert_dict  test_mixed.py:8
+  value["b"][2]: 4 -> 3
+  1 changed, 4 unchanged
+FAILED test_mixed.py::test_exception  test_mixed.py:5 in parse
+  JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+FAILED test_mixed.py::test_param[0,1,3,4]  test_mixed.py:16
+  assert (0 * 2) == (0 + 2)  (first of 4)
+  stdout: debug line 0
+6 failed, 2 passed in 0.25s. xpt failures --json for details.
+```
+
+For that suite, `pytest -q --tb=short` prints 59 lines and 3.1 KB. The rules:
+
+- One block per failure. The location is the deepest frame in the project's own code. Stdlib, site-packages, and pytest frames are dropped.
+- A plain `assert a == b` gets the same path diff as `expect()` through `pytest_assertrepr_compare` when both sides serialize.
+- An exception prints `Type: message` on one line.
+- An `expect()` failure also names its expectation id (`a81f`) once recording lands, so `xpt show` and `xpt accept` can take it directly.
+- Parametrized cases that fail at the same line with the same exception type form one block.
+- Captured output appears only for failing tests, as at most the last 5 lines per stream.
+- No session header, progress dots, separator rules, or warnings summary. The footer is one line.
+- `--xpt-json PATH` writes the same report, untruncated, with `"schema_version": 1`.
+
+Whether the session report turns on by default when an agent harness is detected is open, and is decided in #11.
+
+### CLI
+
+JSON output is the same data with `"schema_version": 1`. Every CLI command takes `--json`. The CLI handlers are thin wrappers over a Python API (`xpt.api.failures()`, `show()`, `accept()`), so an MCP server later is a fourth thin wrapper and not a redesign.
 
 ## Concurrency
 
@@ -237,7 +271,7 @@ expect(actual, expected)          # compares with ==, records on mismatch
 
 Later, as keyword-only arguments: `ignore=`, `unordered=`, `atol=`, `rtol=`, `key=`. These stay in the source, so a reviewer can see them.
 
-pytest plugin options: `--expect-create` and `--expect-no-record`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-no-record`, `--xpt-report=agent|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 
@@ -246,7 +280,7 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M0. Scaffold.** uv, ruff, ty, pytest, CI on 3.11 to 3.14, MIT license.
 - **M1. Core assertion.** `Value`, `serialize`, `diff`, `to_source` for builtins and dataclasses. `expect()` compares and raises with the compact message. No recording yet.
 - **M2. Record and accept.** Call-site identity, JSON Lines recorder, `failures` / `show` / `accept` / `reject` / `clean`, fingerprint checks, atomic multi-edit writes, `--expect-create`. This is the differentiator and the MVP line.
-- **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests.
+- **M3. Agent report and comparison options.** The session report that replaces pytest's terminal output, plain-assert diffs, `ignore=`, `unordered=`, `key=` for parametrized tests.
 - **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic extras with tolerances. An xdist test matrix.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **M6. Release.** Name check, docs, PyPI.

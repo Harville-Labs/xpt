@@ -172,7 +172,7 @@ pytest run
   expect(actual, expected?)
     compare -> pass: nothing written
             -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
-  session end: compact summary, nonzero exit if anything failed or was missing
+  session end: one block per failure, a one-line footer with the next command, pytest's exit code
 
 xpt failures                every group of the latest run, each with its diff
 xpt show <id>               one group with its function and tests, paths only, with limits
@@ -214,6 +214,7 @@ Accept is a state machine per observation group: `recorded -> accepted | rejecte
 - A process with no driver, such as plain unittest or a script, records under the current directory and writes `latest` from an `atexit` hook. Under xdist, the controller hands its run id to each worker.
 - A record over 1 MB keeps its status and site but drops both values. Its detail holds the record's size and the sha256 of the value.
 - `XPT_NO_RECORD` set to any non-empty value turns recording off, like `--expect-no-record`.
+- `XPT_REPORT` set to `pytest` keeps pytest's terminal output, like `--xpt-report=pytest`.
 - If a record cannot be written, the test still fails with its own message, plus one line naming the I/O error.
 - Source writes go to a temp file in the same directory, then `os.replace`, keeping the file's mode. Every accepted change to one file is applied in a single parse and write, last offset first. The new text must compile before it is written.
 
@@ -257,16 +258,38 @@ Acceptance never runs code from the record. It builds source text from the `Valu
 
 ## Reporting
 
-The terminal report replaces pytest's traceback for expect failures:
+When xpt is installed, it replaces pytest's terminal output. Agents read every byte of a test run, and pytest's header, progress dots, rules, and full tracebacks spend tokens without saying more. The report stays readable for people, so it is the default. `--xpt-report=pytest`, or `XPT_REPORT=pytest`, keeps pytest's own output.
 
 ```
-FAILED tests/test_parser.py::test_parser
-  a81f  tests/test_parser.py:14  mismatch
-    expression.operator: "addition" -> "subtraction"
-    1 changed, 42 unchanged
+FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
+  a81f  mismatch
+  value.operator: "addition" -> "subtraction"
+  1 changed, 42 unchanged
+FAILED tests/test_api.py::test_totals  tests/test_api.py:30
+  assert left == right, left -> right:
+  value["total"]: 41 -> 42
+  1 changed, 3 unchanged
+FAILED tests/test_io.py::test_load  src/app/io.py:12 in read_config
+  json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
+  also fails: [1] [3] [4]
+  AssertionError: assert (0 * 2) == (0 + 2)
+  stdout: debug line 0
+7 failed, 2 passed in 0.31s. Next: xpt accept a81f
 ```
 
-Limits: at most 10 changes per expectation, and values longer than 80 characters are cut with a length marker. `xpt show --full` lifts both limits. The session footer prints one line: `3 expectations failed (2 mismatch, 1 missing). xpt failures for details.`
+- Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
+- An `expect()` failure shows its short id, its status, and the path diff.
+- A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`. Scalars, unsupported values, and other operators keep pytest's explanation.
+- Any other exception is one line, `Type: message`, cut to 200 characters.
+- Parametrized cases that fail at the same line with the same kind of error fold into the first case, and `also fails:` lists the rest.
+- A failing test prints the last 5 lines of its captured stdout, stderr, and log.
+- The footer is pytest's counts and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted, or `Next: xpt failures` when none can.
+- `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
+- Internal errors, `-x` stops, and other plugins' summary lines still print. Exit codes are pytest's. Under xdist the controller prints one report, and worker status lines are dropped.
+- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, and `failures`. Each failure has its test, phase, location, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`.
+
+The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
 
 `xpt failures` prints the same block per group, a one-line footer with the counts, and the next command:
 
@@ -309,7 +332,7 @@ expect(actual, expected)  # compares with ==, records on mismatch
 
 Later, as keyword-only arguments: `ignore=`, `unordered=`, `atol=`, `rtol=`, `key=`. These stay in the source, so a reviewer can see them.
 
-pytest plugin options: `--expect-create` and `--expect-no-record`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 

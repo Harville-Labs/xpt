@@ -44,7 +44,10 @@ def _change(c: Change, width: int | None) -> str:
 
 
 def show(value: Value, width: int | None = MAX_CHARS) -> str:
-    text = one_line(value)
+    return cut(one_line(value), width)
+
+
+def cut(text: str, width: int | None) -> str:
     if width is None or len(text) <= width:
         return text
     return f"{text[:width]}... ({len(text)} chars)"

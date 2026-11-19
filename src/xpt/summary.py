@@ -128,15 +128,15 @@ def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
             return [*lines, f"  {cut(o.detail, lim.message)}"]
         case Compared():
             found = diff(detail.left, detail.right)
-            return ["  assert left == right, left -> right:", *_changes(found, lim)]
+            return ["  assert left == right:", *_changes(found, lim, labeled=True)]
         case Raised():
             return _raised(detail, lim)
         case Text():
             return _text(detail.text, lim)
 
 
-def _changes(found: Diff, lim: Limits) -> Lines:
-    return changes(found, limit=lim.changes, width=lim.width)
+def _changes(found: Diff, lim: Limits, labeled: bool = False) -> Lines:
+    return changes(found, limit=lim.changes, width=lim.width, labeled=labeled)
 
 
 def _raised(r: Raised, lim: Limits) -> Lines:

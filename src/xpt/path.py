@@ -25,6 +25,11 @@ Step = Attr | Index | Key
 Path = tuple[Step, ...]
 
 
+def field_path(path: Path, name: str) -> Path:
+    """The path to a field; the positional field "" of a constructor call adds no step."""
+    return (*path, Attr(name)) if name else path
+
+
 def format_path(path: Path, root: str = "value") -> str:
     return root + "".join(_format_step(s) for s in path)
 

@@ -4,6 +4,7 @@ import sys
 
 from xpt import record, report
 from xpt.diff import diff
+from xpt.equal import equal
 from xpt.record import Observation, Status
 from xpt.serialize import UnsupportedValue, serialize
 from xpt.site import locate
@@ -23,12 +24,14 @@ class ExpectationFailed(AssertionError):
 def expect(actual: object, expected: object = _MISSING, *, _depth: int = 0) -> None:
     """Fail unless `actual == expected`, explaining a mismatch path by path.
 
+    Arrays, tensors, and frames must also match in type, shape, and dtype.
+
     Leaving out `expected` always fails, so a new expectation never passes unreviewed.
     A failure is recorded under `.xpt/` for review. A helper that calls `expect` passes
     `_depth=1` so the record points at the helper's caller.
     """
     __tracebackhide__ = True
-    if expected is not _MISSING and actual == expected:
+    if expected is not _MISSING and equal(actual, expected):
         return
     frame = sys._getframe(1 + _depth)
     rec = record.recorder

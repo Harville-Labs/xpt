@@ -3,21 +3,16 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
-from xpt.path import Attr, Index, Key, Path, format_path
+from xpt import adapters
+from xpt.path import Attr, Index, Key, Path
+from xpt.unsupported import UnsupportedValue, type_name
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Seq, Set, Str, Value
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
 
 
-class UnsupportedValue(TypeError):
-    def __init__(self, path: Path, reason: str) -> None:
-        self.path = path
-        self.reason = reason
-        super().__init__(
-            f"{format_path(path)} {reason}; xpt cannot record it. "
-            "Register an adapter or expect a field of it instead."
-        )
+__all__ = ["UnsupportedValue", "serialize"]
 
 
 def serialize(obj: object) -> Value:
@@ -63,28 +58,26 @@ def _container(obj: object, path: Path, active: set[int]) -> Value:
             return Dict(tuple(pairs))
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return _dataclass(obj, path, active)
-    raise UnsupportedValue(path, f"is a {_type_name(exact)}")
+    if adapter := adapters.find(exact):
+        return adapter(obj, path, lambda o, p: _serialize(o, p, active))
+    raise UnsupportedValue(path, f"is a {type_name(exact)}")
 
 
 def _dataclass(obj: DataclassInstance, path: Path, active: set[int]) -> Dataclass:
     cls = type(obj)
     params = getattr(cls, "__dataclass_params__", None)
     if params is not None and not params.eq:
-        raise UnsupportedValue(path, f"is a {_type_name(cls)} with eq=False, so == is identity")
+        raise UnsupportedValue(path, f"is a {type_name(cls)} with eq=False, so == is identity")
     fields = dataclasses.fields(obj)
     for f in fields:
         if not f.init or not f.compare:
             raise UnsupportedValue(
-                path, f"is a {_type_name(cls)} whose field {f.name!r} has init or compare off"
+                path, f"is a {type_name(cls)} whose field {f.name!r} has init or compare off"
             )
     return Dataclass(
-        _type_name(cls),
+        type_name(cls),
         tuple(
             (f.name, _serialize(getattr(obj, f.name), (*path, Attr(f.name)), active))
             for f in fields
         ),
     )
-
-
-def _type_name(cls: type) -> str:
-    return f"{cls.__module__}:{cls.__qualname__}"

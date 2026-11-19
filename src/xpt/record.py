@@ -105,9 +105,8 @@ class Recorder:
         temp = directory / f"latest.{self.run}.tmp"
         temp.write_text(self.run, encoding="utf-8")
         os.replace(temp, directory / "latest")
-        runs = sorted(p for p in (directory / "runs").glob("*") if _RUN_ID.fullmatch(p.name))
-        for old in runs[:-KEEP_RUNS]:
-            shutil.rmtree(old, ignore_errors=True)
+        for old in run_ids(self.root)[:-KEEP_RUNS]:
+            shutil.rmtree(directory / "runs" / old, ignore_errors=True)
 
     def _open(self) -> TextIO:
         run_dir = state_directory(self.root) / "runs" / self.run
@@ -141,16 +140,26 @@ def load_run(root: Path, run: str | None = None) -> list[Observation]:
     """Read every observation of one run, the latest when `run` is None."""
     directory = root / DIRECTORY
     if run is None:
-        latest = directory / "latest"
-        if not latest.is_file():
-            raise RecordError(f"{latest.as_posix()} does not exist. Run the tests to record a run.")
-        run = _run_id(latest.read_text(encoding="utf-8").strip())
+        run = latest_run(root)
         if not (directory / "runs" / run).is_dir():
             return []
     run_dir = directory / "runs" / _run_id(run)
     if not run_dir.is_dir():
         raise RecordError(f"there is no run {run} in {(directory / 'runs').as_posix()}.")
     return [o for path in sorted(run_dir.glob("*.jsonl")) for o in _read(root, path)]
+
+
+def latest_run(root: Path) -> str:
+    latest = root / DIRECTORY / "latest"
+    if not latest.is_file():
+        raise RecordError(f"{latest.as_posix()} does not exist. Run the tests to record a run.")
+    return _run_id(latest.read_text(encoding="utf-8").strip())
+
+
+def run_ids(root: Path) -> list[str]:
+    """The ids of the run directories under `.xpt/runs`, oldest first."""
+    runs = root / DIRECTORY / "runs"
+    return sorted(p.name for p in runs.glob("*") if _RUN_ID.fullmatch(p.name) and p.is_dir())
 
 
 def _run_id(text: str) -> str:

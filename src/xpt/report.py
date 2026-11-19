@@ -14,30 +14,37 @@ def missing(actual: Value) -> str:
 
 
 def mismatch(result: Diff) -> str:
-    shown = result.changes[:MAX_CHANGES]
+    return "\n".join(["expect() mismatch:", *changes(result)])
+
+
+def changes(
+    result: Diff, *, limit: int | None = MAX_CHANGES, width: int | None = MAX_CHARS
+) -> list[str]:
+    """The diff's changes as indented lines, cut to `limit` changes; None lifts a limit."""
+    shown = result.changes if limit is None else result.changes[:limit]
     hidden = len(result.changes) - len(shown)
-    lines = ["expect() mismatch:", *(_change(c) for c in shown)]
+    lines = [_change(c, width) for c in shown]
     if hidden:
         lines.append(f"  ... {hidden} more changes")
     lines.append(f"  {len(result.changes)} changed, {result.unchanged} unchanged")
-    return "\n".join(lines)
+    return lines
 
 
-def _change(c: Change) -> str:
+def _change(c: Change, width: int | None) -> str:
     expected, actual = c.expected, c.actual
     if expected is not None and actual is not None:
-        text = f"{show(expected)} -> {show(actual)}"
+        text = f"{show(expected, width)} -> {show(actual, width)}"
     elif expected is not None:
-        text = f"removed {show(expected)}"
+        text = f"removed {show(expected, width)}"
     elif actual is not None:
-        text = f"added {show(actual)}"
+        text = f"added {show(actual, width)}"
     else:
         raise AssertionError(f"a change needs at least one side: {c!r}")
     return f"  {format_path(c.path)}: {text}"
 
 
-def show(value: Value) -> str:
+def show(value: Value, width: int | None = MAX_CHARS) -> str:
     text = one_line(value)
-    if len(text) <= MAX_CHARS:
+    if width is None or len(text) <= width:
         return text
-    return f"{text[:MAX_CHARS]}... ({len(text)} chars)"
+    return f"{text[:width]}... ({len(text)} chars)"

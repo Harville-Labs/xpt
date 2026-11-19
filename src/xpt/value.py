@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -67,23 +68,31 @@ class Dataclass:
 
 Value = Str | Int | Float | Bool | Null | Seq | Set | Dict | Dataclass
 
-Json = dict[str, object]
+Json = object
+
+SPECIAL_FLOATS = ("nan", "inf", "-inf")
 
 
 def to_json(value: Value) -> Json:
     match value:
         case Str(v) | Int(v) | Bool(v):
-            return {"t": type(v).__name__, "v": v}
+            return v
+        case Float(text) if text in SPECIAL_FLOATS:
+            return {"float": text}
         case Float(text):
-            return {"t": "float", "v": text}
+            return float(text)
         case Null():
-            return {"t": "none"}
+            return None
+        case Seq("list", items):
+            return [to_json(i) for i in items]
         case Seq(kind, items) | Set(kind, items):
-            return {"t": kind, "items": [to_json(i) for i in items]}
+            return {kind: [to_json(i) for i in items]}
+        case Dict(items) if all(isinstance(k, Str) for k, _ in items):
+            return {"dict": {cast(Str, k).v: to_json(v) for k, v in items}}
         case Dict(items):
-            return {"t": "dict", "items": [[to_json(k), to_json(v)] for k, v in items]}
+            return {"dict": [[to_json(k), to_json(v)] for k, v in items]}
         case Dataclass(name, fields):
-            return {"t": "dataclass", "type": name, "fields": [[f, to_json(v)] for f, v in fields]}
+            return {name: {f: to_json(v) for f, v in fields}}
 
 
 def canonical(value: Value) -> str:
@@ -95,75 +104,55 @@ class InvalidValue(ValueError):
 
 
 def from_json(data: object) -> Value:
-    obj = _object(data)
-    t = obj.get("t")
-    match t:
-        case "str":
-            return Str(_str(obj, "v"))
-        case "int":
-            v = obj.get("v")
-            if type(v) is not int:
-                raise InvalidValue(f"int value needs an integer 'v', got {v!r}")
-            return Int(v)
-        case "bool":
-            v = obj.get("v")
-            if type(v) is not bool:
-                raise InvalidValue(f"bool value needs a boolean 'v', got {v!r}")
-            return Bool(v)
-        case "float":
-            return Float(_float_text(_str(obj, "v")))
-        case "none":
+    match data:
+        case bool():
+            return Bool(data)
+        case int():
+            return Int(data)
+        case float() if math.isfinite(data):
+            return Float(repr(data))
+        case str():
+            return Str(data)
+        case None:
             return Null()
-        case "list" | "tuple":
-            return Seq(
-                "list" if t == "list" else "tuple", tuple(from_json(i) for i in _list(obj, "items"))
-            )
-        case "set" | "frozenset":
-            items = [from_json(i) for i in _list(obj, "items")]
-            return Set.of("set" if t == "set" else "frozenset", items)
-        case "dict":
-            pairs = (_pair(p) for p in _list(obj, "items"))
-            return Dict(tuple((from_json(k), from_json(v)) for k, v in pairs))
-        case "dataclass":
-            pairs = (_pair(p) for p in _list(obj, "fields"))
-            return Dataclass(_str(obj, "type"), tuple((_name(k), from_json(v)) for k, v in pairs))
-    raise InvalidValue(f"unknown value type {t!r}")
+        case list():
+            return Seq("list", _items(data))
+        case dict() if len(data) == 1:
+            [(tag, payload)] = data.items()
+            return _tagged(tag, payload)
+    raise InvalidValue(f"expected a JSON value or a one-key tagged object, got {data!r}")
 
 
-def _object(data: object) -> Json:
-    if not isinstance(data, dict):
-        raise InvalidValue(f"expected a value object, got {type(data).__name__}")
-    return cast(Json, data)
+def _tagged(tag: object, payload: object) -> Value:
+    match tag, payload:
+        case "tuple", list():
+            return Seq("tuple", _items(payload))
+        case "set", list():
+            return Set.of("set", list(_items(payload)))
+        case "frozenset", list():
+            return Set.of("frozenset", list(_items(payload)))
+        case "float", str() if payload in SPECIAL_FLOATS:
+            return Float(payload)
+        case "dict", dict():
+            return Dict(tuple((Str(k), from_json(v)) for k, v in _fields(payload)))
+        case "dict", list():
+            return Dict(tuple((from_json(k), from_json(v)) for k, v in map(_pair, payload)))
+        case str(), dict() if ":" in tag:
+            return Dataclass(tag, tuple((k, from_json(v)) for k, v in _fields(payload)))
+    raise InvalidValue(
+        f"unknown tagged value {{{tag!r}: {payload!r}}}. Tags are tuple, set, frozenset, "
+        'float, dict, or a dataclass type like "module:Qualname".'
+    )
 
 
-def _str(obj: Json, key: str) -> str:
-    v = obj.get(key)
-    if not isinstance(v, str):
-        raise InvalidValue(f"{obj.get('t')} value needs a string {key!r}, got {v!r}")
-    return v
+def _items(data: list[object]) -> tuple[Value, ...]:
+    return tuple(from_json(i) for i in data)
 
 
-def _list(obj: Json, key: str) -> list[object]:
-    v = obj.get(key)
-    if not isinstance(v, list):
-        raise InvalidValue(f"{obj.get('t')} value needs a list {key!r}, got {v!r}")
-    return cast(list[object], v)
-
-
-def _float_text(text: str) -> str:
-    try:
-        parsed = float(text)
-    except ValueError:
-        parsed = None
-    if parsed is None or repr(parsed) != text:
-        raise InvalidValue(f"float value must be a Python float repr like '1.5', got {text!r}")
-    return text
-
-
-def _name(data: object) -> str:
-    if not isinstance(data, str):
-        raise InvalidValue(f"dataclass field name must be a string, got {data!r}")
-    return data
+def _fields(data: dict[object, object]) -> list[tuple[str, object]]:
+    if not all(isinstance(k, str) for k in data):
+        raise InvalidValue(f"object keys must be strings, got {list(data)!r}")
+    return cast(list[tuple[str, object]], list(data.items()))
 
 
 def _pair(data: object) -> tuple[object, object]:

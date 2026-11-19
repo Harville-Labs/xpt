@@ -119,19 +119,33 @@ def test_dataclass_with_a_non_init_field_is_unsupported():
         serialize(Cached(1))
 
 
+def test_json_is_plain_except_where_json_cannot_say_the_type():
+    obj = {"a": [1, 2.5, True, None]}
+    assert to_json(serialize(obj)) == {"dict": {"a": [1, 2.5, True, None]}}
+    assert to_json(serialize((1,))) == {"tuple": [1]}
+    assert to_json(serialize({1: "x"})) == {"dict": [[1, "x"]]}
+    assert to_json(serialize(math.nan)) == {"float": "nan"}
+    assert to_json(serialize(Point(1, "a"))) == {"values:Point": {"x": 1, "y": "a"}}
+
+
+def test_an_integral_float_stays_a_float_through_json_text():
+    assert from_json(json.loads(json.dumps(to_json(serialize(1.0))))) == Float("1.0")
+
+
 @pytest.mark.parametrize(
     "data",
     [
-        [],
-        {"t": "date"},
-        {"t": "int", "v": "1"},
-        {"t": "int", "v": True},
-        {"t": "bool", "v": 1},
-        {"t": "float", "v": "1.50"},
-        {"t": "float", "v": "eval()"},
-        {"t": "list", "items": {}},
-        {"t": "dict", "items": [[{"t": "none"}]]},
-        {"t": "dataclass", "type": "m:C", "fields": [[1, {"t": "none"}]]},
+        {},
+        {"date": "2026-01-01"},
+        {"tuple": [], "set": []},
+        {"tuple": {}},
+        {"float": "1.5"},
+        {"float": "eval()"},
+        {"dict": [[1]]},
+        {"dict": "a"},
+        {"m:C": [1]},
+        math.inf,
+        object(),
     ],
 )
 def test_malformed_json_is_rejected(data: object):

@@ -113,6 +113,15 @@ Group           # every failed observation of one call site in a run, built at r
   detail: str             # why the group cannot be accepted, "" when it can
   acceptable              # derived: status is missing or mismatch
 
+Outcome         # what accept did with one group
+  group: Group
+  status: "accepted" | "already_accepted" | "stale" | "skipped"
+  reason: str             # why it was not written, "" when accepted or already accepted
+
+AcceptResult
+  outcomes: [Outcome]     # one per group, in the order given
+  changed: [str]          # project-relative paths that were rewritten
+
 Change
   path: [str | int]       # ["expression", "operator"]
   op: "replace" | "add" | "remove"
@@ -133,7 +142,9 @@ An expectation's identity is its `CallSite` minus `arg_sha` and `line`: `(path, 
 1. Parse the file as it is now.
 2. Find the function by `qualname` and the call by `callee` and `ordinal`.
 3. Hash the expected argument's current source text and compare it to `arg_sha`.
-4. Refuse if the function, the call, or the hash does not match. The error names the file, the expectation, and the fix: `tests/test_parser.py: expectation a81f changed since run 7c2e. Run pytest again to record a fresh observation.`
+4. Refuse if the function, the call, or the hash does not match. The group is `stale`, and its reason names the file and the fix: `tests/test_parser.py:12 changed since the run. Run the tests again.`
+
+Before the hash check, accept renders the call it would write. If the file already holds exactly that text, the group is `already_accepted`. This is what makes a second accept a no-op instead of a stale refusal.
 
 This refuses exactly when it should. Editing an unrelated test, adding a line above, or reformatting a different call does not invalidate the record. Editing the expectation itself, or adding an `expect()` call above it in the same function, does. The second case is a false refusal we accept, because it is cheap to fix and a false accept is not.
 
@@ -194,7 +205,17 @@ Accept is a state machine per observation group: `recorded -> accepted | rejecte
 - A record over 1 MB keeps its status and site but drops both values. Its detail holds the record's size and the sha256 of the value.
 - `XPT_NO_RECORD` set to any non-empty value turns recording off, like `--expect-no-record`.
 - If a record cannot be written, the test still fails with its own message, plus one line naming the I/O error.
-- Source writes go to a temp file in the same directory, then `os.replace`. Every accepted change to one file is applied in a single parse and write.
+- Source writes go to a temp file in the same directory, then `os.replace`, keeping the file's mode. Every accepted change to one file is applied in a single parse and write, last offset first. The new text must compile before it is written.
+
+## Writing the expected value
+
+- A missing expectation becomes the second positional argument. A mismatch replaces the expected argument where it is, positional or `expected=`. Other arguments, such as `_depth=1`, stay where they are.
+- The whole call is reprinted the way `ruff format` would at line width 100. It stays on one line if it fits, then splits to one indented line of arguments, then one argument per line with a trailing comma. A magic trailing comma or a multi-line string forces the last form.
+- A call with a comment, `*args`, or `**kwargs` inside it is not reprinted. Only the expected argument is written, so the comment survives. The result is valid Python but may need a `ruff format`.
+- The rest of the file keeps its bytes. Offsets are UTF-8 byte offsets, so non-ASCII text before a call does not shift the edit. The file keeps its newline style and its byte order mark.
+- Files that are not UTF-8, by declaration or by content, are refused.
+- A dataclass value is written by its class name only when the file binds that name at module level, by import, class, or assignment. Otherwise the group is skipped and the reason says which import is missing.
+- Groups that are not acceptable are skipped with their `detail`, without reading the file.
 
 SQLite would buy queries we do not need. It would also make concurrent writers our problem. JSON Lines is readable with `jq` and easy to delete.
 
@@ -243,7 +264,7 @@ JSON is the same data with `"schema_version": 1`. Every CLI command takes `--jso
 
 - xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed.
 - Two pytest sessions at once in one project each get their own run directory. `latest` names whichever finished last. That is acceptable, and `--run <id>` selects another.
-- Accept while pytest runs: accept takes an exclusive `fcntl`/`msvcrt` lock on `.xpt/accept.lock`, so two accepts don't race on one file. A test run racing an accept is caught by the fingerprint check on the next accept.
+- Accept while pytest runs: accept creates `.xpt/accept.lock` with `O_CREAT | O_EXCL`, which behaves the same on POSIX and Windows, and deletes it when done. A second accept fails with a message naming the lock file. A crash can leave the file behind, so the message says to delete it if no accept is running. A test run racing an accept is caught by the fingerprint check on the next accept.
 
 ## Risks
 

@@ -88,7 +88,7 @@ def run(pytester: pytest.Pytester, *args: str, **files: str) -> pytest.RunResult
 
 
 def lines(result: pytest.RunResult) -> list[str]:
-    return [DURATION.sub(" in 0.00s", line) for line in result.outlines]
+    return [DURATION.sub(" in 0.00s", line) for line in result.outlines if line]
 
 
 def test_a_passing_run_prints_one_line(pytester: pytest.Pytester):
@@ -115,7 +115,9 @@ def test_the_report_is_at_most_a_third_of_pytest_short_output(pytester: pytest.P
 
 def test_xdist_workers_produce_the_same_single_report(pytester: pytest.Pytester):
     result = run(pytester, "-n", "2", test_mixed=MIXED)
-    assert lines(result) == MIXED_REPORT
+    output = lines(result)
+    assert output[:2] == ["created: 2/2 workers", "2 workers [10 items]"]
+    assert output[2:] == MIXED_REPORT
     assert result.ret == 1
 
 
@@ -124,7 +126,12 @@ def test_verbose_raises_the_limits(pytester: pytest.Pytester):
     quiet = run(pytester, test_long=source)
     verbose = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-v")
     assert lines(quiet)[2] == f"  ValueError: {'x' * 188}... (312 chars)"
-    assert lines(verbose)[2] == f"  ValueError: {'x' * 300}"
+    assert f"  ValueError: {'x' * 300}" in lines(verbose)
+
+
+def test_verbose_keeps_pytest_line_per_test(pytester: pytest.Pytester):
+    result = run(pytester, "-v", test_ok="def test_a():\n    pass\n")
+    result.stdout.fnmatch_lines(["test_ok.py::test_a PASSED*", "1 passed in *s."])
 
 
 def test_a_failure_in_a_nested_helper_shows_the_project_call_chain(pytester: pytest.Pytester):
@@ -183,13 +190,16 @@ def test_load():
 
 def test_the_footer_counts_warnings(pytester: pytest.Pytester):
     source = "import warnings\n\ndef test_warns():\n    warnings.warn('old', DeprecationWarning)\n"
-    assert lines(run(pytester, test_warns=source)) == ["1 passed, 1 warning in 0.00s."]
+    result = run(pytester, test_warns=source)
+    result.stdout.fnmatch_lines(["*= warnings summary =*", "*DeprecationWarning*"])
+    assert lines(result)[-1] == "1 passed, 1 warning in 0.00s."
 
 
 def test_very_verbose_adds_the_traceback(pytester: pytest.Pytester):
     result = run(pytester, "-vv", test_tb="def test_tb():\n    raise ValueError('boom')\n")
     output = lines(result)
-    assert output[:4] == [
+    start = output.index("FAILED test_tb.py::test_tb  test_tb.py:2")
+    assert output[start : start + 4] == [
         "FAILED test_tb.py::test_tb  test_tb.py:2",
         "  > raise ValueError('boom')",
         "  ValueError: boom",
@@ -249,8 +259,9 @@ def test_query(db):
 
 def test_a_collection_error_is_shown(pytester: pytest.Pytester):
     result = run(pytester, test_broken="import nosuchmodule\n")
-    assert lines(result) == [
-        "Interrupted: 1 error during collection",
+    output = lines(result)
+    assert re.fullmatch(r"!+ Interrupted: 1 error during collection !+", output[0])
+    assert output[1:] == [
         "ERROR test_broken.py (collect)",
         "  E   ModuleNotFoundError: No module named 'nosuchmodule'",
         "1 error in 0.00s.",

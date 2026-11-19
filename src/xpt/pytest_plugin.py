@@ -13,7 +13,7 @@ from xpt.expect import ExpectationFailed
 from xpt.failure import Compared, Detail, Expected, Frame, Raised, Text, Where, where_json
 from xpt.serialize import UnsupportedValue, serialize
 from xpt.summary import limits
-from xpt.terminal import AgentReporter, location
+from xpt.terminal import AgentReporter, location, stock_reason
 from xpt.value import Value
 
 MODES = ("xpt", "pytest")
@@ -55,8 +55,13 @@ def pytest_configure(config: pytest.Config) -> None:
     mode = _mode(config)
     config.stash[_MODE] = mode
     config.stash[_COMPARED] = None
-    if mode == "xpt" and workerinput is None:
+    if mode != "xpt" or workerinput is not None:
+        return
+    reason = stock_reason(config)
+    if reason is None:
         AgentReporter.install(config, config.getoption("xpt_json"))
+    elif config.getoption("xpt_json"):
+        raise pytest.UsageError(f"--xpt-json needs the xpt report, but {reason}.")
 
 
 def _mode(config: pytest.Config) -> str:

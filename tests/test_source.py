@@ -29,7 +29,7 @@ def ruff_changes(src: str) -> str:
         [ruff, "format", "--isolated", "--line-length", "100", "--diff", "-"],
         input=src,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=False,
     )
     return done.stdout

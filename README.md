@@ -10,6 +10,19 @@ def test_parser():
     expect(parse("x + y"))
 ```
 
+With xpt installed, `pytest` prints one short block per failure and a footer with the next command, in place of pytest's header, dots, and tracebacks:
+
+```
+FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
+  > expect(parse(source), tree)
+  a81f  mismatch
+  value.operator: "addition" -> "subtraction"
+  1 changed, 42 unchanged
+1 failed, 12 passed in 0.31s. Next: xpt accept a81f
+```
+
+`-v` raises the limits, `-vv` adds the traceback, and `--xpt-json PATH` writes the whole report as JSON. `--xpt-report=pytest`, or `XPT_REPORT=pytest`, keeps pytest's own output.
+
 A run records what `expect` saw under `.xpt/`. Then:
 
 ```sh

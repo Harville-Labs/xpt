@@ -119,12 +119,12 @@ def group_json(g: Group) -> dict[str, Json]:
         data["expected"] = to_json(g.expected)
     found = group_diff(g)
     if found is not None:
-        data["changes"] = [_change_json(c) for c in found.changes]
+        data["changes"] = [change_json(c) for c in found.changes]
         data["unchanged"] = found.unchanged
     return data
 
 
-def _change_json(c: Change) -> dict[str, Json]:
+def change_json(c: Change) -> dict[str, Json]:
     data: dict[str, Json] = {"path": format_path(c.path), "op": c.op}
     if c.expected is not None:
         data["expected"] = to_json(c.expected)

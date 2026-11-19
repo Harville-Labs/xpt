@@ -4,6 +4,7 @@ from support import assert_rebuilds
 from xpt import expect
 from xpt.equal import equal
 from xpt.serialize import UnsupportedValue, serialize
+from xpt.tolerance import Tolerance
 from xpt.value import Float, Int
 
 np = pytest.importorskip("numpy")
@@ -94,3 +95,18 @@ def test_a_complex_array_rebuilds_with_complex_elements():
     names = NAMES | {"builtins:complex": "complex"}
     source = assert_rebuilds(np.array([1 + 2j], dtype="complex64"), names, SCOPE)
     assert source == 'np.array([complex(real=1.0, imag=2.0)], dtype="complex64")'
+
+
+def test_a_float_array_within_atol_passes_and_one_outside_fails():
+    expect(np.array([1.0, 2.0004]), np.array([1.0, 2.0]), atol=1e-3)
+    with pytest.raises(AssertionError, match=r"value\[1\]: 2.0 -> 2.5"):
+        expect(np.array([1.0, 2.5]), np.array([1.0, 2.0]), atol=1e-3)
+
+
+def test_a_tolerance_leaves_integer_arrays_exact():
+    assert not equal(np.array([2]), np.array([1]), Tolerance(atol=5))
+
+
+def test_a_complex_array_holds_each_part_to_the_tolerance():
+    expect(np.array([1.0005 + 2j]), np.array([1 + 2j]), atol=1e-3)
+    assert not equal(np.array([1 + 2.1j]), np.array([1 + 2j]), Tolerance(atol=1e-3))

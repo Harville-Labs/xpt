@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from xpt.path import Attr, Key, Path
+from xpt.tolerance import Tolerance
 from xpt.unsupported import UnsupportedValue, type_name
 from xpt.value import SPECIAL_FLOATS, Dataclass, Dict, Float, Int, Ref, Seq, Str, Value
 
@@ -33,15 +34,15 @@ def find(cls: type) -> Adapter | None:
     return None
 
 
-def same(a: object, b: object) -> bool | None:
+def same(a: object, b: object, tol: Tolerance) -> bool | None:
     """Whether two values are equal, for types whose == does not return a bool."""
     check = _equality(type(a)) or _equality(type(b))
     if check is None:
         return None
-    return type(a) is type(b) and check(a, b)
+    return type(a) is type(b) and check(a, b, tol)
 
 
-def _equality(cls: type) -> Callable[[Any, Any], bool] | None:
+def _equality(cls: type) -> Callable[[Any, Any, Tolerance], bool] | None:
     for base in cls.__mro__:
         if check := _EQUALITY.get(f"{base.__module__}.{base.__qualname__}"):
             return check
@@ -108,15 +109,26 @@ def _shortest(x: float, pack: str) -> str:
     return repr(x)
 
 
-def _same_array(a: Any, b: Any) -> bool:
+def _same_numpy(a: Any, b: Any, tol: Tolerance) -> bool:
+    return _same_array(a, b, tol, a.dtype.kind in "fc", a.dtype.kind == "c")
+
+
+def _same_tensor(a: Any, b: Any, tol: Tolerance) -> bool:
+    if a.device != b.device:
+        return False
+    complex_ = a.is_complex()
+    inexact = complex_ or a.is_floating_point()
+    return _same_array(a.detach().cpu(), b.detach().cpu(), tol, inexact, complex_)
+
+
+def _same_array(a: Any, b: Any, tol: Tolerance, inexact: bool, complex_: bool) -> bool:
     if a.shape != b.shape or a.dtype != b.dtype:
         return False
-    both_nan = (a != a) & (b != b)
-    return bool(((a == b) | both_nan).all())
-
-
-def _same_tensor(a: Any, b: Any) -> bool:
-    return a.device == b.device and _same_array(a.detach().cpu(), b.detach().cpu())
+    if not (tol and inexact):
+        return bool(((a == b) | ((a != a) & (b != b))).all())
+    if complex_:
+        return bool((tol.within(a.real, b.real) & tol.within(a.imag, b.imag)).all())
+    return bool(tol.within(a, b).all())
 
 
 def _scalar(obj: Any, path: Path, recurse: Recurse) -> Value:
@@ -184,8 +196,8 @@ def _axis(index: Any, path: Path, recurse: Recurse) -> Value:
     return Dataclass("pandas:Index", tuple(fields))
 
 
-def _same_pandas(a: Any, b: Any) -> bool:
-    if getattr(a, "ndim", 2) == 1 and (a.dtype != b.dtype or a.name != b.name):
+def _same_pandas(a: Any, b: Any, tol: Tolerance) -> bool:
+    if a.ndim == 1 and (a.dtype != b.dtype or a.name != b.name):
         return False
     axes = [(a.index, b.index)]
     if a.ndim == 2:
@@ -193,7 +205,22 @@ def _same_pandas(a: Any, b: Any) -> bool:
     for mine, theirs in axes:
         if list(mine.names) != list(theirs.names) or mine.dtype != theirs.dtype:
             return False
-    return bool(a.equals(b))
+    if not tol:
+        return bool(a.equals(b))
+    if not all(mine.equals(theirs) for mine, theirs in axes):
+        return False
+    if a.ndim == 1:
+        return _same_column(a, b, tol)
+    return all(_same_column(a.iloc[:, i], b.iloc[:, i], tol) for i in range(a.shape[1]))
+
+
+def _same_column(a: Any, b: Any, tol: Tolerance) -> bool:
+    if a.dtype != b.dtype:
+        return False
+    kind = a.dtype.kind
+    if not type(a.dtype).__module__.startswith("numpy") or kind not in "fc":
+        return bool(a.equals(b))
+    return _same_array(a.to_numpy(), b.to_numpy(), tol, True, kind == "c")
 
 
 def _limit(kind: str, size: int, path: Path) -> None:
@@ -268,8 +295,8 @@ _ADAPTERS: dict[str, Adapter] = {
     "google.protobuf.message.Message": _message,
 }
 
-_EQUALITY: dict[str, Callable[[Any, Any], bool]] = {
-    "numpy.ndarray": _same_array,
+_EQUALITY: dict[str, Callable[[Any, Any, Tolerance], bool]] = {
+    "numpy.ndarray": _same_numpy,
     "torch.Tensor": _same_tensor,
     "pandas.Series": _same_pandas,
     "pandas.DataFrame": _same_pandas,

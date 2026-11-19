@@ -5,6 +5,7 @@ from xpt import expect
 
 expect(actual)  # missing: fails and records actual
 expect(actual, expected)  # passes when actual equals expected, fails with a diff otherwise
+expect(actual, expected, atol=1e-6)  # floats pass when within the tolerance
 ```
 
 `expect` compares `actual` with `expected`. When they differ, or when `expected` is left out, the test fails with `ExpectationFailed` and xpt records the actual value under `.xpt/` so `xpt accept` can write it into the source.
@@ -39,7 +40,11 @@ Subclasses of builtins, such as an `IntEnum` member, are refused rather than rec
 
 ## Comparison
 
-A call passes when `actual == expected`. Arrays, tensors, and pandas objects are the exception, because their `==` compares element by element: they pass only when both sides have the same type, shape, and dtype and every element is equal. A tensor must also be on the same device, and a pandas object must have an equal index, with the same names and dtype. `nan` equals `nan`, both as a plain float and as an array element in the same place, so a recorded `float("nan")` passes. Lists, tuples, dicts, and dataclasses that hold arrays are compared item by item the same way. Tolerances (`atol`, `rtol`) are not supported yet. When it fails, the diff and the grouping of repeated calls use the same structural equality, so `1` and `1.0` are equal. A dataclass is compared field by field, and its class must be the same.
+A call passes when `actual == expected`. Arrays, tensors, and pandas objects are the exception, because their `==` compares element by element: they pass only when both sides have the same type, shape, and dtype and every element is equal. A tensor must also be on the same device, and a pandas object must have an equal index, with the same names and dtype. `nan` equals `nan`, both as a plain float and as an array element in the same place, so a recorded `float("nan")` passes. Lists, tuples, dicts, and dataclasses that hold arrays are compared item by item the same way. When it fails, the diff and the grouping of repeated calls use the same structural equality, so `1` and `1.0` are equal. A dataclass is compared field by field, and its class must be the same.
+
+### Tolerances
+
+`atol` and `rtol` let floats differ a little. A float passes when `|actual - expected| <= atol + rtol * |expected|`, both are 0 by default, and both must be finite and 0 or more. The rule applies to every float in the value, to each element of a float array, tensor, or pandas column, and to the real and imaginary parts of a complex number on their own. Integers, integer arrays, strings, and everything else still compare exactly, so `expect(2, 1, atol=5)` fails. An integer next to a float uses the tolerance. An infinity equals only an infinity of the same sign, and `nan` equals `nan`. The failure header names the tolerance, as in `expect() mismatch (atol=0.001):`, and the diff lists only the values outside it. The tolerance is recorded with the run, so `xpt failures`, `xpt show`, and the end-of-session summary show the same diff, and `xpt accept` keeps the keywords in the source.
 
 A record over 1 MB keeps its status but drops both values. Expect a smaller part of the value instead.
 

@@ -22,7 +22,7 @@ def seen(test: str = "tests/test_a.py::test_a", **changes: object) -> Observatio
         "detail": "",
     }
     fields.update(changes)
-    return Observation(**fields)  # type: ignore[arg-type]
+    return Observation(**fields)  # type: ignore
 
 
 def test_one_failing_call_makes_one_acceptable_group():

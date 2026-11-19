@@ -3,6 +3,7 @@ from support import assert_rebuilds
 
 from xpt import expect
 from xpt.equal import equal
+from xpt.tolerance import Tolerance
 
 torch = pytest.importorskip("torch")
 
@@ -63,3 +64,9 @@ def test_a_tensor_off_the_cpu_records_its_device_and_compares_it():
     source = assert_rebuilds(tensor, names("float32"), SCOPE)
     assert source == 'torch.tensor([1.0], dtype=torch.float32, device="mps:0")'
     assert not equal(tensor, tensor.cpu())
+
+
+def test_a_float_tensor_within_atol_passes_and_an_integer_one_stays_exact():
+    expect(torch.tensor([1.0, 2.0004]), torch.tensor([1.0, 2.0]), atol=1e-3)
+    assert not equal(torch.tensor([1.0, 2.5]), torch.tensor([1.0, 2.0]), Tolerance(atol=1e-3))
+    assert not equal(torch.tensor([2]), torch.tensor([1]), Tolerance(atol=5))

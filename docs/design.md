@@ -19,7 +19,7 @@ We read the source of all four projects (default branch, November 2026). File re
 | Create missing values | Accept mode | `create` | `--snapshot-update` | Approve file | `accept --missing` |
 | Accept later without a rerun | No | No | No | Yes, by moving files | Yes, per change |
 | Review per change | No | No, one prompt per category | No | Per file, in a diff tool | Yes |
-| Persisted proposed changes | No | No | No | `.received` files | `.expect/runs/` |
+| Persisted proposed changes | No | No | No | `.received` files | `.xpt/runs/` |
 | Stale-source detection | No | No | No | No | Yes |
 | Structured path diff | No | No | No | No | Yes |
 | JSON output | No | No | No | No | Yes |
@@ -58,7 +58,7 @@ Changing either would be a rewrite of its core, not a pull request. We should st
 
 The brief was a good starting point. These parts of it change.
 
-1. **Recording is on by default. There is no `--expect-record` flag.** The point is to avoid a second test run. If an agent must rerun with `--expect-record` after a plain `pytest` fails, the flag costs the very run we are trying to save. Every run writes its failed and missing observations to `.expect/`, which is gitignored. `--expect-no-record` turns this off. The cost is a few kilobytes per failing assertion. The privacy cost is no worse than pytest's own failure output, which already prints the same values. `xpt clean` deletes the directory.
+1. **Recording is on by default. There is no `--expect-record` flag.** The point is to avoid a second test run. If an agent must rerun with `--expect-record` after a plain `pytest` fails, the flag costs the very run we are trying to save. Every run writes its failed and missing observations to `.xpt/`, which is gitignored. `--expect-no-record` turns this off. The cost is a few kilobytes per failing assertion. The privacy cost is no worse than pytest's own failure output, which already prints the same values. `xpt clean` deletes the directory.
 2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks.
 3. **No LibCST.** The prototype in `docs/prototypes/` shows that the standard library is enough. `code.co_positions()` (Python 3.11+) gives the exact span of the running call. `ast` gives the span of each argument. A byte-offset splice replaces only the expected argument, so comments, formatting, and every other line stay untouched. LibCST would add a native wheel and a YAML dependency to rewrite one argument we can already locate exactly. We still parse the result with `compile()` before writing.
 4. **No runtime dependencies.** pytest is optional. `executing` and `asttokens`, which inline-snapshot uses, are not needed on Python 3.11+.
@@ -69,7 +69,7 @@ The brief was a good starting point. These parts of it change.
 
 ## Data shapes
 
-Everything else follows from four records.
+Everything else follows from these records.
 
 ```python
 CallSite        # where an expect() call lives in source
@@ -77,6 +77,12 @@ CallSite        # where an expect() call lives in source
   qualname: str           # "TestParser.test_add", from co_qualname
   ordinal: int            # index of this call among expect() calls in that function, in source order
   arg_sha: str            # sha256 of the expected-argument source text, or "" when absent
+  line: int               # for display only, never used to locate the call
+
+Unlocatable     # a call xpt cannot rewrite (no source file, file changed since import)
+  reason: str
+  path: str
+  line: int
 
 Value           # a serialized, typed value tree. Never code, never pickle.
   "a" | 1 | 1.5 | true | null | [Value, ...]     # plain JSON where JSON keeps the type
@@ -87,16 +93,14 @@ Value           # a serialized, typed value tree. Never code, never pickle.
   {"module:Qualname": {field: Value, ...}}         # a dataclass
   {"adapter": {"name": "numpy.ndarray", "data": Value}}
 
-Observation     # one call of expect() in one run
-  id: str                 # stable short id, see Identity
+Observation     # one failed call of expect() in one run
   run: str                # run id
-  test: str               # pytest node id, or the qualname outside pytest
-  site: CallSite
-  line: int               # for display only, never used to locate the call
-  status: "missing" | "mismatch" | "unsupported" | "conflict"
-  expected: Value | None
-  actual: Value
-  changes: [Change]       # structured diff, empty for missing
+  test: str               # pytest node id, or the expect() caller's qualname outside pytest
+  site: CallSite | Unlocatable  # an unlocatable site is shown but never accepted
+  status: "missing" | "mismatch" | "unsupported"
+  expected: Value | None  # None when missing or unsupported
+  actual: Value | None    # None when unsupported or over the size cap
+  detail: str             # "" normally; the UnsupportedValue message, or "too large: N bytes, sha256 <hex>"
 
 Change
   path: [str | int]       # ["expression", "operator"]
@@ -104,6 +108,8 @@ Change
   expected: Value | None
   actual: Value | None
 ```
+
+An observation stores no diff and no id. Readers derive both: `diff(expected, actual)` gives the changes, and `site_id(site)` gives the id. One copy of each rule means a stored diff can never disagree with the values it came from. `conflict` is not recorded either. It is the status of a group of observations whose values differ (see Conflicting observations).
 
 A passing assertion writes nothing. Run state lives on disk as records. In memory there is only the open file handle.
 
@@ -137,7 +143,7 @@ expecttest detects the same case within one process. We detect it across process
 pytest run
   expect(actual, expected?)
     compare -> pass: nothing written
-            -> fail: Observation appended to .expect/runs/<run>/<worker>.jsonl
+            -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
   session end: compact summary, nonzero exit if anything failed or was missing
 
 xpt failures [--json]       read the latest run, group by id, print one line per id
@@ -156,7 +162,7 @@ Accept is a state machine per observation group: `recorded -> accepted | rejecte
 ## Persistence
 
 ```
-.expect/
+.xpt/
   .gitignore            # "*", written on first use
   runs/<run>/<worker>.jsonl
   latest                # the run id of the newest complete run
@@ -166,6 +172,11 @@ Accept is a state machine per observation group: `recorded -> accepted | rejecte
 - Each pytest process, controller or xdist worker, appends to its own file. Nothing is shared, so nothing is locked. This follows "separate before serializing shared state."
 - The controller writes `latest` at session end with `os.replace`, so a crashed run never becomes the latest.
 - Old runs are pruned to the last 5 by default.
+- Each line is one JSON object with `"schema_version": 1`. A value that is absent (`expected` when missing) is left out of the object, so a recorded `None` stays distinct from no value. Reading a run validates every line and names the file and line of a malformed one.
+- A process with no driver, such as plain unittest or a script, records under the current directory and writes `latest` from an `atexit` hook. Under xdist, the controller hands its run id to each worker.
+- A record over 1 MB keeps its status and site but drops both values. Its detail holds the record's size and the sha256 of the value.
+- `XPT_NO_RECORD` set to any non-empty value turns recording off, like `--expect-no-record`.
+- If a record cannot be written, the test still fails with its own message, plus one line naming the I/O error.
 - Source writes go to a temp file in the same directory, then `os.replace`. Every accepted change to one file is applied in a single parse and write.
 
 SQLite would buy queries we do not need. It would also make concurrent writers our problem. JSON Lines is readable with `jq` and easy to delete.
@@ -215,7 +226,7 @@ JSON is the same data with `"schema_version": 1`. Every CLI command takes `--jso
 
 - xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed.
 - Two pytest sessions at once in one project each get their own run directory. `latest` names whichever finished last. That is acceptable, and `--run <id>` selects another.
-- Accept while pytest runs: accept takes an exclusive `fcntl`/`msvcrt` lock on `.expect/accept.lock`, so two accepts don't race on one file. A test run racing an accept is caught by the fingerprint check on the next accept.
+- Accept while pytest runs: accept takes an exclusive `fcntl`/`msvcrt` lock on `.xpt/accept.lock`, so two accepts don't race on one file. A test run racing an accept is caught by the fingerprint check on the next accept.
 
 ## Risks
 
@@ -224,7 +235,7 @@ JSON is the same data with `"schema_version": 1`. Every CLI command takes `--jso
 - **Generated or non-file sources** (doctests, notebooks, `python -c`): same as above.
 - **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets. `ignore=` and adapters cover the rest. Default `repr` of arbitrary objects is never used, because it embeds addresses.
 - **Large values.** Records are capped at 1 MB per observation by default. Larger values are recorded as a hash plus a summary and cannot be inline-accepted.
-- **Sensitive data.** `.expect/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `xpt clean`. The README says so plainly.
+- **Sensitive data.** `.xpt/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `xpt clean`. The README says so plainly.
 - **Python 3.11 floor** excludes 3.10 users. 3.10 is end of life, so this is acceptable.
 - **`co_positions` can be disabled** with `-X no_debug_ranges`. We detect `None` positions and fall back to line-only matching, refusing when a line holds more than one call.
 

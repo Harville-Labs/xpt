@@ -23,7 +23,7 @@ docs/prototypes/  throwaway prototypes, excluded from lint and type checks
 ## Invariants
 
 - **No runtime dependencies.** `dependencies = []` in `pyproject.toml`, and `tests/test_package.py` enforces it. pytest support is an optional plugin. This repository therefore parses its own recorded files with the standard library instead of Pydantic. That departs from the shared Python standard on purpose: a test library that users install everywhere must not pull a dependency tree into their environment.
-- **Recorded values are data.** Never `eval`, `exec`, or unpickle anything read from `.expect/`. Values are rebuilt from the typed JSON tree only.
+- **Recorded values are data.** Never `eval`, `exec`, or unpickle anything read from `.xpt/`. Values are rebuilt from the typed JSON tree only.
 - **Source files are written only through accept.** Test runs never edit source. `pytest --expect-create` applies changes after the session through the same accept path.
 - **Accept never writes stale changes.** It checks the expected argument's fingerprint and refuses if the source changed since the run.
 - **Python 3.11 is the floor.** Call-site location depends on `code.co_positions()` and `co_qualname`.

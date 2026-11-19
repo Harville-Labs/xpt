@@ -101,8 +101,8 @@ def lock(lock: Path) -> Generator[None]:
     except FileExistsError:
         shown = lock.as_posix()
         raise AcceptError(
-            f"{shown} exists, so another xpt accept is running. "
-            f"If none is, delete {shown} and run accept again."
+            f"{shown} exists, so another xpt command is writing to .xpt/. "
+            f"If none is, delete {shown} and run the command again."
         ) from None
     try:
         os.write(fd, str(os.getpid()).encode("ascii"))

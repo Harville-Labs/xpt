@@ -7,10 +7,11 @@ import os
 import re
 import secrets
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, TextIO, cast
+from typing import Literal, TextIO, TypeVar, cast
 
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Value, canonical, from_json, to_json
@@ -24,6 +25,8 @@ DIRECTORY = ".xpt"
 
 _STATUSES: tuple[Status, ...] = ("missing", "mismatch", "unsupported")
 _RUN_ID = re.compile(r"\d{8}T\d{6}-[0-9a-f]{4}")
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,7 +152,9 @@ def load_run(root: Path, run: str | None = None) -> list[Observation]:
     run_dir = directory / "runs" / _run_id(run)
     if not run_dir.is_dir():
         raise RecordError(f"there is no run {run} in {(directory / 'runs').as_posix()}.")
-    return [o for path in sorted(run_dir.glob("*.jsonl")) for o in _read(root, path)]
+    return [
+        o for path in sorted(run_dir.glob("*.jsonl")) for o in read_jsonl(root, path, from_record)
+    ]
 
 
 def latest_run(root: Path) -> str:
@@ -171,16 +176,17 @@ def _run_id(text: str) -> str:
     return text
 
 
-def _read(root: Path, path: Path) -> list[Observation]:
+def read_jsonl(root: Path, path: Path, parse: Callable[[object], T]) -> list[T]:
+    """Parse each line of a JSON Lines file under `root`, naming the file and line of a bad one."""
     shown = path.relative_to(root).as_posix()
-    observations = []
+    parsed = []
     with path.open(encoding="utf-8") as lines:
         for number, line in enumerate(lines, 1):
             try:
-                observations.append(from_record(json.loads(line)))
+                parsed.append(parse(json.loads(line)))
             except ValueError as error:
                 raise RecordError(f"{shown}:{number}: {_reason(error)}") from error
-    return observations
+    return parsed
 
 
 def _reason(error: ValueError) -> str:
@@ -231,55 +237,61 @@ def _without_values(o: Observation, size: int) -> Observation:
     return Observation(o.run, o.test, o.site, o.status, None, None, detail)
 
 
-def from_record(data: object) -> Observation:
-    record = _object(data, "the record")
+def versioned(data: object) -> dict[str, object]:
+    """The record as an object, if it carries the schema version this xpt reads."""
+    record = json_object(data, "the record")
     version = record.get("schema_version")
     if version != SCHEMA_VERSION:
         raise ValueError(f"schema_version is {version!r}, and this xpt reads version 1.")
-    status = _str(record, "status")
+    return record
+
+
+def from_record(data: object) -> Observation:
+    record = versioned(data)
+    status = json_str(record, "status")
     if status not in _STATUSES:
         raise ValueError(f"status must be one of {', '.join(_STATUSES)}, got {status!r}.")
     return Observation(
-        run=_str(record, "run"),
-        test=_str(record, "test"),
-        site=_decode_site(_object(record.get("site"), "site")),
+        run=json_str(record, "run"),
+        test=json_str(record, "test"),
+        site=_decode_site(json_object(record.get("site"), "site")),
         status=status,
         expected=_value(record, "expected"),
         actual=_value(record, "actual"),
-        detail=_str(record, "detail"),
+        detail=json_str(record, "detail"),
     )
 
 
 def _decode_site(site: dict[str, object]) -> CallSite | Unlocatable:
     kind = site.get("kind")
     if kind == "unlocatable":
-        return Unlocatable(_str(site, "reason"), _str(site, "path"), _int(site, "line"))
+        return Unlocatable(json_str(site, "reason"), json_str(site, "path"), json_int(site, "line"))
     if kind == "call":
         return CallSite(
-            _str(site, "path"),
-            _str(site, "qualname"),
-            _str(site, "callee"),
-            _int(site, "ordinal"),
-            _str(site, "arg_sha"),
-            _int(site, "line"),
+            json_str(site, "path"),
+            json_str(site, "qualname"),
+            json_str(site, "callee"),
+            json_int(site, "ordinal"),
+            json_str(site, "arg_sha"),
+            json_int(site, "line"),
         )
     raise ValueError(f'site.kind must be "call" or "unlocatable", got {kind!r}.')
 
 
-def _object(data: object, name: str) -> dict[str, object]:
+def json_object(data: object, name: str) -> dict[str, object]:
     if not isinstance(data, dict):
         raise ValueError(f"{name} must be a JSON object, got {data!r}.")
     return cast(dict[str, object], data)
 
 
-def _str(data: dict[str, object], key: str) -> str:
+def json_str(data: dict[str, object], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str):
         raise ValueError(f"{key} must be a string, got {value!r}.")
     return value
 
 
-def _int(data: dict[str, object], key: str) -> int:
+def json_int(data: dict[str, object], key: str) -> int:
     value = data.get(key)
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError(f"{key} must be an integer, got {value!r}.")

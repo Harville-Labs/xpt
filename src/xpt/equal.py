@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import Any
 
 from xpt import adapters
@@ -9,12 +10,16 @@ from xpt import adapters
 def equal(a: Any, b: Any) -> bool:
     """Python's ==, except that arrays and frames must match in type, shape, and dtype.
 
+    NaN equals NaN, so a recorded float("nan") passes against a NaN result.
+
     Lists, tuples, dicts, and dataclasses are compared item by item so an array inside one
     is compared the same way.
     """
     same = adapters.same(a, b)
     if same is not None:
         return same
+    if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+        return True
     kind = type(a)
     if kind is type(b):
         if kind is list or kind is tuple:

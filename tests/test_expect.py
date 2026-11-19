@@ -76,3 +76,12 @@ def test_a_failing_expect_fails_under_plain_unittest(tmp_path: Path):
     )
     assert run.returncode == 1
     assert "value[0]: 2 -> 1" in run.stderr
+
+
+def test_a_recorded_nan_passes_against_a_nan_result():
+    expect(float("nan"), float("nan"))
+    expect({"x": [float("nan")]}, {"x": [float("nan")]})
+
+
+def test_a_complex_mismatch_names_the_part_that_changed():
+    assert "value.imag: 2.0 -> 3.0" in failure(1 + 3j, 1 + 2j)

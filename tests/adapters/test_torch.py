@@ -44,3 +44,22 @@ def test_a_mismatch_points_at_the_differing_element():
     with pytest.raises(AssertionError) as raised:
         expect(torch.tensor([1, 2, 3]), torch.tensor([1, 9, 3]))
     assert "value[1]" in str(raised.value)
+
+
+def test_nan_elements_in_the_same_place_are_equal():
+    expect(torch.tensor([float("nan"), 1.0]), torch.tensor([float("nan"), 1.0]))
+
+
+def test_a_complex_tensor_rebuilds():
+    tensor = torch.tensor([1 + 2j], dtype=torch.complex64)
+    source = assert_rebuilds(tensor, names("complex64") | {"builtins:complex": "complex"}, SCOPE)
+    assert source == "torch.tensor([complex(real=1.0, imag=2.0)], dtype=torch.complex64)"
+
+
+def test_a_tensor_off_the_cpu_records_its_device_and_compares_it():
+    if not torch.backends.mps.is_available():
+        pytest.skip("needs a non-CPU device; this machine has only the CPU")
+    tensor = torch.tensor([1.0], device="mps")
+    source = assert_rebuilds(tensor, names("float32"), SCOPE)
+    assert source == 'torch.tensor([1.0], dtype=torch.float32, device="mps:0")'
+    assert not equal(tensor, tensor.cpu())

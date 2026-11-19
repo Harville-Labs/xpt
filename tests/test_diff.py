@@ -48,13 +48,14 @@ def test_changes_are_empty_exactly_when_python_says_equal(a: object, b: object):
         (0.0, -0.0),
         ({1}, frozenset({1.0})),
         ({"a": 1, "b": 2}, {"b": 2, "a": 1}),
+        (math.nan, math.nan),
     ],
 )
-def test_values_python_calls_equal_have_no_changes(a: object, b: object):
+def test_values_xpt_calls_equal_have_no_changes(a: object, b: object):
     assert d(a, b).changes == ()
 
 
-@pytest.mark.parametrize(("a", "b"), [([1], (1,)), (math.nan, math.nan), (1, "1")])
+@pytest.mark.parametrize(("a", "b"), [([1], (1,)), (1, "1")])
 def test_values_python_calls_unequal_are_replaced(a: object, b: object):
     assert d(a, b).changes == (Change((), "replace", serialize(a), serialize(b)),)
 

@@ -29,10 +29,12 @@ def diff(expected: Value, actual: Value) -> Diff:
 
 
 def norm(value: Value) -> Hashable:
-    """A hashable stand-in that is equal exactly when Python's == says the values are."""
+    """A hashable stand-in that is equal exactly when xpt's comparison says the values are."""
     match value:
         case Str(v) | Int(v) | Bool(v):
             return v
+        case Float("nan"):
+            return ("float", "nan")
         case Float():
             return value.v
         case Null():

@@ -151,3 +151,9 @@ def test_an_integral_float_stays_a_float_through_json_text():
 def test_malformed_json_is_rejected(data: object):
     with pytest.raises(InvalidValue):
         from_json(data)
+
+
+def test_a_complex_number_is_a_complex_call_by_keyword():
+    assert serialize(1 - 2j) == Dataclass(
+        "builtins:complex", (("real", Float("1.0")), ("imag", Float("-2.0")))
+    )

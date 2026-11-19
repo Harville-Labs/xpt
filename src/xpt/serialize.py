@@ -30,6 +30,10 @@ def _serialize(obj: object, path: Path, active: set[int]) -> Value:
             return Int(obj)
         case float() if exact is float:
             return Float.of(obj)
+        case complex() if exact is complex:
+            return Dataclass(
+                "builtins:complex", (("real", Float.of(obj.real)), ("imag", Float.of(obj.imag)))
+            )
         case None:
             return Null()
     if id(obj) in active:

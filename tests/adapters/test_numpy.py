@@ -50,9 +50,9 @@ def to_python(obj: object) -> object:
     return value.v
 
 
-def test_complex_arrays_are_unsupported_with_the_dtype_named():
-    with pytest.raises(UnsupportedValue, match="complex128"):
-        serialize(np.array([1j]))
+def test_datetime_arrays_are_unsupported_with_the_dtype_named():
+    with pytest.raises(UnsupportedValue, match="datetime64"):
+        serialize(np.array(["2026-01-01"], dtype="datetime64[D]"))
 
 
 def test_arrays_larger_than_the_inline_limit_are_unsupported():
@@ -83,3 +83,14 @@ def test_a_dtype_mismatch_is_reported_on_the_dtype():
     with pytest.raises(AssertionError) as raised:
         expect(np.array([1, 2], dtype=np.int32), np.array([1, 2], dtype=np.int64))
     assert "value.dtype" in str(raised.value)
+
+
+def test_nan_elements_in_the_same_place_are_equal():
+    expect(np.array([np.nan, 1.0]), np.array([np.nan, 1.0]))
+    assert not equal(np.array([np.nan, 1.0]), np.array([1.0, np.nan]))
+
+
+def test_a_complex_array_rebuilds_with_complex_elements():
+    names = NAMES | {"builtins:complex": "complex"}
+    source = assert_rebuilds(np.array([1 + 2j], dtype="complex64"), names, SCOPE)
+    assert source == 'np.array([complex(real=1.0, imag=2.0)], dtype="complex64")'

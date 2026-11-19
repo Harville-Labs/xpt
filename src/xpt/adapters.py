@@ -21,7 +21,7 @@ LIMIT = 10_000
 Recurse = Callable[[object, Path], Value]
 Adapter = Callable[[Any, Path, Recurse], Value]
 
-_PACK = {"float32": "f", "float16": "e"}
+_PACK = {"float32": "f", "float16": "e", "complex64": "f", "complex32": "e"}
 
 
 def find(cls: type) -> Adapter | None:
@@ -50,19 +50,17 @@ def _equality(cls: type) -> Callable[[Any, Any], bool] | None:
 
 def _ndarray(obj: Any, path: Path, recurse: Recurse) -> Value:
     dtype = obj.dtype
-    if dtype.kind not in "biufU" or dtype.name == "float128":
+    if dtype.kind not in "biufcU" or dtype.name in ("float128", "complex256"):
         raise UnsupportedValue(path, f"is a numpy array of dtype {dtype.name}")
     name = dtype.str if dtype.kind == "U" else dtype.name
-    return _array("numpy", obj.shape, obj.size, obj.tolist, Str(name), path, recurse)
+    return _array("numpy", obj.shape, obj.size, obj.tolist, Str(name), (), path, recurse)
 
 
 def _tensor(obj: Any, path: Path, recurse: Recurse) -> Value:
-    dtype = str(obj.dtype)
-    if obj.is_complex():
-        raise UnsupportedValue(path, f"is a torch tensor of dtype {dtype}")
     values = obj.detach().cpu().tolist
-    ref = Ref(dtype.replace(".", ":", 1))
-    return _array("torch", tuple(obj.shape), obj.numel(), values, ref, path, recurse)
+    ref = Ref(str(obj.dtype).replace(".", ":", 1))
+    device = () if obj.device.type == "cpu" else (("device", Str(str(obj.device))),)
+    return _array("torch", tuple(obj.shape), obj.numel(), values, ref, device, path, recurse)
 
 
 def _array(
@@ -71,6 +69,7 @@ def _array(
     size: int,
     values: Callable[[], object],
     dtype: Str | Ref,
+    extra: tuple[tuple[str, Value], ...],
     path: Path,
     recurse: Recurse,
 ) -> Value:
@@ -80,13 +79,13 @@ def _array(
         )
     if size == 0 and len(shape) > 1:
         dims = Seq("tuple", tuple(Int(n) for n in shape))
-        return Dataclass(f"{module}:zeros", (("", dims), ("dtype", dtype)))
+        return Dataclass(f"{module}:zeros", (("", dims), ("dtype", dtype), *extra))
     pack = _PACK.get(dtype.v if isinstance(dtype, Str) else dtype.type.partition(":")[2])
     items = recurse(values(), path)
     if pack:
         items = _shorten(items, pack)
     ctor = "array" if module == "numpy" else "tensor"
-    return Dataclass(f"{module}:{ctor}", (("", items), ("dtype", dtype)))
+    return Dataclass(f"{module}:{ctor}", (("", items), ("dtype", dtype), *extra))
 
 
 def _shorten(value: Value, pack: str) -> Value:
@@ -95,6 +94,8 @@ def _shorten(value: Value, pack: str) -> Value:
             return Float(_shortest(float(text), pack))
         case Seq(kind, items):
             return Seq(kind, tuple(_shorten(i, pack) for i in items))
+        case Dataclass("builtins:complex", parts):
+            return Dataclass("builtins:complex", tuple((n, _shorten(v, pack)) for n, v in parts))
     return value
 
 
@@ -108,11 +109,14 @@ def _shortest(x: float, pack: str) -> str:
 
 
 def _same_array(a: Any, b: Any) -> bool:
-    return a.shape == b.shape and a.dtype == b.dtype and bool((a == b).all())
+    if a.shape != b.shape or a.dtype != b.dtype:
+        return False
+    both_nan = (a != a) & (b != b)
+    return bool(((a == b) | both_nan).all())
 
 
 def _same_tensor(a: Any, b: Any) -> bool:
-    return _same_array(a.detach().cpu(), b.detach().cpu())
+    return a.device == b.device and _same_array(a.detach().cpu(), b.detach().cpu())
 
 
 def _scalar(obj: Any, path: Path, recurse: Recurse) -> Value:
@@ -129,8 +133,8 @@ def _series(obj: Any, path: Path, recurse: Recurse) -> Value:
 
 def _frame(obj: Any, path: Path, recurse: Recurse) -> Value:
     _limit("pandas DataFrame", obj.size, path)
-    if obj.columns.nlevels > 1 or not obj.columns.is_unique:
-        raise UnsupportedValue(path, "is a pandas DataFrame whose columns are not unique labels")
+    if not obj.columns.is_unique:
+        raise UnsupportedValue(path, "is a pandas DataFrame whose column labels repeat")
     pd = sys.modules["pandas"]
     columns = []
     for label in obj.columns:
@@ -144,8 +148,10 @@ def _frame(obj: Any, path: Path, recurse: Recurse) -> Value:
             )
         key = recurse(label, path)
         columns.append((key, recurse(values, (*path, Key(key)))))
-    fields = (("", Dict(tuple(columns))), *_index(obj, path, recurse))
-    return Dataclass("pandas:DataFrame", fields)
+    fields = [("", Dict(tuple(columns))), *_index(obj, path, recurse)]
+    if any(name is not None for name in obj.columns.names):
+        fields.append(("columns", _axis(obj.columns, (*path, Attr("columns")), recurse)))
+    return Dataclass("pandas:DataFrame", tuple(fields))
 
 
 def _index(obj: Any, path: Path, recurse: Recurse) -> tuple[tuple[str, Value], ...]:
@@ -156,14 +162,37 @@ def _index(obj: Any, path: Path, recurse: Recurse) -> tuple[tuple[str, Value], .
         and index.name is None
     ):
         return ()
-    if index.nlevels > 1 or index.name is not None:
-        raise UnsupportedValue(path, "has a named or multi-level index")
-    return (("index", recurse(index.tolist(), (*path, Attr("index")))),)
+    return (("index", _axis(index, (*path, Attr("index")), recurse)),)
+
+
+def _axis(index: Any, path: Path, recurse: Recurse) -> Value:
+    names = list(index.names)
+    if index.nlevels > 1:
+        fields = [("", recurse(list(index), path))]
+        if any(name is not None for name in names):
+            fields.append(("names", recurse(names, (*path, Attr("names")))))
+        return Dataclass("pandas:MultiIndex.from_tuples", tuple(fields))
+    values = index.tolist()
+    inferred = sys.modules["pandas"].Index(values).dtype == index.dtype
+    if inferred and index.name is None:
+        return recurse(values, path)
+    fields = [("", recurse(values, path))]
+    if not inferred:
+        fields.append(("dtype", Str(str(index.dtype))))
+    if index.name is not None:
+        fields.append(("name", recurse(index.name, (*path, Attr("name")))))
+    return Dataclass("pandas:Index", tuple(fields))
 
 
 def _same_pandas(a: Any, b: Any) -> bool:
     if getattr(a, "ndim", 2) == 1 and (a.dtype != b.dtype or a.name != b.name):
         return False
+    axes = [(a.index, b.index)]
+    if a.ndim == 2:
+        axes.append((a.columns, b.columns))
+    for mine, theirs in axes:
+        if list(mine.names) != list(theirs.names) or mine.dtype != theirs.dtype:
+            return False
     return bool(a.equals(b))
 
 
@@ -203,14 +232,22 @@ def _attrs(obj: Any, path: Path, recurse: Recurse) -> Value:
 
 def _message(obj: Any, path: Path, recurse: Recurse) -> Value:
     fields = []
+    extensions = []
     for field, value in obj.ListFields():
-        if field.is_extension:
-            raise UnsupportedValue(path, f"sets the protobuf extension {field.full_name}")
-        at = (*path, Attr(field.name))
         entry = field.message_type is not None and field.message_type.GetOptions().map_entry
         plain = dict(value) if entry else list(value) if field.is_repeated else value
-        fields.append((_keyword(field.name, type(obj), path), recurse(plain, at)))
-    return Dataclass(type_name(type(obj)), tuple(fields))
+        if field.is_extension:
+            key = Str(field.full_name)
+            extensions.append((key, recurse(plain, (*path, Attr("extensions"), Key(key)))))
+        else:
+            at = (*path, Attr(field.name))
+            fields.append((_keyword(field.name, type(obj), path), recurse(plain, at)))
+    message = Dataclass(type_name(type(obj)), tuple(fields))
+    if not extensions:
+        return message
+    return Dataclass(
+        "xpt:expect.with_extensions", (("", message), ("extensions", Dict(tuple(extensions))))
+    )
 
 
 def _keyword(name: str, cls: type, path: Path) -> str:

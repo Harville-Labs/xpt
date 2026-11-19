@@ -279,6 +279,10 @@ The registry maps a class name such as `numpy.ndarray` to its adapter and is sea
 
 Comparison is `==` everywhere except for arrays, tensors, and pandas objects, whose `==` is element-wise and broadcasts: `np.array([1]) == np.array([[1.0]])` is truthy. `equal` (`src/xpt/equal.py`) compares those by type, shape, dtype, and elements, and walks lists, tuples, dicts, and dataclasses item by item so an array nested in a dict is held to the same rule.
 
+`equal` treats `nan` as equal to `nan`, in plain floats and element by element in arrays. Otherwise a recorded `float("nan")` could never pass, and accepting it would write a test that always fails. `diff` follows the same rule.
+
+A value an adapter cannot express as one constructor call is wrapped in an xpt helper reached through `expect`, such as `expect.with_extensions(msg, extensions={...})` for protobuf extensions. Its type id is `xpt:expect.with_extensions`, so a file that imports `expect` already has the name.
+
 Arrays over 10,000 elements are refused rather than written inline. A summary with a hash, tolerances (`atol`, `rtol`), and a mismatch count with the first differing indices remain open.
 
 Acceptance never runs code from the record. It builds source text from the `Value` tree. It never calls `eval`, `pickle`, or the observed object's `__repr__`.

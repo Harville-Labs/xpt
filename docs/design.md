@@ -102,6 +102,16 @@ Observation     # one failed call of expect() in one run
   actual: Value | None    # None when unsupported or over the size cap
   detail: str             # "" normally; the UnsupportedValue message, or "too large: N bytes, sha256 <hex>"
 
+Group           # every failed observation of one call site in a run, built at read time
+  id: str | None          # short display id, None for an unlocatable site
+  site: CallSite | Unlocatable
+  status: "missing" | "mismatch" | "unsupported" | "unlocatable" | "conflict"
+  actuals: [Value]        # the distinct actual values, one when the calls agree
+  expected: Value | None  # None when missing, or when the calls disagree on it
+  tests: [str]            # every test that reached the site
+  detail: str             # why the group cannot be accepted, "" when it can
+  acceptable              # derived: status is missing or mismatch
+
 Change
   path: [str | int]       # ["expression", "operator"]
   op: "replace" | "add" | "remove"
@@ -134,6 +144,12 @@ One call site can run many times: in a loop, in a parametrized test, from a help
 
 - If every observation has the same value, it is a single change.
 - If the values differ, the status is `conflict`. Accept refuses and lists the distinct values with their test ids. The fix is a separate `expect()` per case, or `expect(value, expected, key=param)` in a later milestone.
+- Values are equal when `norm` says so, the same equality `diff` uses, so `1` and `1.0` agree.
+- Calls that disagree on `arg_sha` are a conflict too, because the file changed during the run. So are calls with equal actual values but different expected values, which happens when the expected argument depends on a parameter.
+- If any call recorded no actual value (unsupported, or over the size cap), the group is `unsupported` and cannot be accepted.
+- Unlocatable observations group by path, line, and reason. They are shown with status `unlocatable` and never accepted.
+
+`xpt.group.group(observations)` does this. It is pure, and its result is sorted by path, line, and ordinal, so the input order does not matter.
 
 expecttest detects the same case within one process. We detect it across processes and across xdist workers, because the grouping happens after recording.
 

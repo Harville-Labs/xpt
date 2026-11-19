@@ -121,3 +121,11 @@ def test_multiline_text_that_triple_quotes_cannot_hold_is_escaped(text: str):
 def test_a_dataclass_without_a_resolvable_name_is_unsupported():
     with pytest.raises(UnsupportedValue, match=r"value\[0\] is a values:Point"):
         to_source(serialize([Point(1, 2)]))
+
+
+@pytest.mark.parametrize("key_len", [40, 95])
+def test_a_dict_entry_splits_its_key_only_when_the_key_overflows_the_line(key_len: int):
+    obj = [{("k" * key_len, 1): ["v" * 40, "w" * 40]}]
+    printed = "x = " + source(obj, column=4)
+    assert ruff_changes(printed + "\n") == ""
+    assert (f'("{"k" * key_len}", 1): [' in printed) == (key_len == 40)

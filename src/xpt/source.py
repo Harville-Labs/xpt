@@ -66,16 +66,21 @@ class _Printer:
         return "\n".join([prefix + group.opener, *body, " " * indent + group.closer + suffix])
 
     def child(self, c: _Child, parent: Path, indent: int, suffix: str) -> str:
-        if c.key is not None and not self.splits(c.value, c.path) and self.splits(c.key, parent):
-            return self.render(
-                c.key,
-                parent,
-                indent,
-                indent,
-                "",
-                c.label[-2:] + self.flat(c.value, c.path) + suffix,
-            )
+        if c.key is not None and self.splits(c.key, parent) and not self.head_fits(c, indent):
+            tail = ": " + self.flat(c.value, c.path) + suffix
+            key = self.render(c.key, parent, indent, indent, "", tail)
+            if "\n" in key:
+                head, _, last = key[: -len(tail)].rpartition("\n")
+                value = self.render(c.value, c.path, indent, _width(last), ": ", suffix)
+                return head + "\n" + last + value
+            return key
         return self.render(c.value, c.path, indent, indent, c.label, suffix)
+
+    def head_fits(self, c: _Child, indent: int) -> bool:
+        group = self.group(c.value, c.path)
+        if group is None or not group.children:
+            return False
+        return indent + _width(c.label + group.opener) <= self.width
 
     def splits(self, value: Value, path: Path) -> bool:
         group = self.group(value, path)

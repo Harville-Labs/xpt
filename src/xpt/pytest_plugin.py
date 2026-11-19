@@ -124,13 +124,15 @@ def _where(
     if excinfo is None:
         return Where(path, None if line is None else line + 1, None, Text(rep.longreprtext))
     detail = _detail(excinfo, compared)
+    cause = _cause(excinfo.value)
     frames = _project_frames(excinfo, item.config.rootpath)
     if not frames:
-        return Where(path, None if line is None else line + 1, None, detail)
+        return Where(path, None if line is None else line + 1, None, detail, cause=cause)
     test = getattr(item, "originalname", item.name)
     *callers, (path, lineno, name, source) = frames
     chain = tuple(Frame(p, n, None if f == test else f) for p, n, f, _ in callers)
-    return Where(path, lineno, None if name == test else name, detail, chain, source or None)
+    function = None if name == test else name
+    return Where(path, lineno, function, detail, chain, source or None, cause)
 
 
 def _project_frames(
@@ -157,12 +159,23 @@ def _detail(
         return Expected(error.observation)
     if compared is not None and isinstance(error, AssertionError):
         return Compared(*compared)
-    kind = type(error)
-    name = kind.__qualname__
-    if kind.__module__ != "builtins" and not kind.__module__.startswith("_pytest."):
-        name = f"{kind.__module__}.{name}"
     message = "\n".join([str(error), *getattr(error, "__notes__", ())])
-    return Raised(name, message)
+    return Raised(_name(error), message)
+
+
+def _cause(error: BaseException) -> str | None:
+    cause = error.__cause__ or (None if error.__suppress_context__ else error.__context__)
+    if cause is None:
+        return None
+    message = " ".join(str(cause).split())
+    return f"{_name(cause)}: {message}" if message else _name(cause)
+
+
+def _name(error: BaseException) -> str:
+    kind = type(error)
+    if kind.__module__ == "builtins" or kind.__module__.startswith("_pytest."):
+        return kind.__qualname__
+    return f"{kind.__module__}.{kind.__qualname__}"
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:

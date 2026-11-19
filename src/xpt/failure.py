@@ -50,6 +50,7 @@ class Where:
 
     `callers` are the project frames above it, outermost first, and `source` is its
     stripped source line. A `function` here or in a caller is None for the test itself.
+    `cause` is the chained exception, explicit or implicit, as one `Type: message` line.
     """
 
     path: str
@@ -58,6 +59,7 @@ class Where:
     detail: Detail
     callers: tuple[Frame, ...] = ()
     source: str | None = None
+    cause: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +90,7 @@ def where_json(w: Where) -> dict[str, Json]:
         "function": w.function,
         "callers": [{"path": f.path, "line": f.line, "function": f.function} for f in w.callers],
         "source": w.source,
+        "cause": w.cause,
         "detail": detail_json(w.detail),
     }
 
@@ -106,6 +109,7 @@ def where_from_json(data: object) -> Where:
         detail_from_json(record.get("detail")),
         tuple(_frame(c) for c in cast(list[object], callers)),
         _optional(record, "source", str),
+        _optional(record, "cause", str),
     )
 
 

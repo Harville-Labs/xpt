@@ -163,6 +163,14 @@ def test_the_failing_source_line_is_shown_and_cut():
     ]
 
 
+def test_a_chained_cause_follows_the_error_on_one_cut_line():
+    where = Where("t.py", 3, None, Raised("ValueError", "bad"), cause="KeyError: " + "k" * 300)
+    assert report_lines(session(failure(where=where)), QUIET)[1:3] == [
+        "  ValueError: bad",
+        f"  caused by: KeyError: {'k' * 190}... (310 chars)",
+    ]
+
+
 def test_a_collection_error_header_does_not_repeat_the_path():
     f = failure("t.py", when="collect", where=Where("t.py", None, None, Text("E   boom")))
     assert report_lines(session(f), QUIET)[0] == "ERROR t.py (collect)"
@@ -179,7 +187,9 @@ def test_a_collection_error_header_does_not_repeat_the_path():
     ids=["expect", "compare", "raised", "text"],
 )
 def test_where_survives_its_json_round_trip(detail: Detail):
-    where = Where("t.py", 3, "helper", detail, (Frame("t.py", 9, None),), "helper()")
+    where = Where(
+        "t.py", 3, "helper", detail, (Frame("t.py", 9, None),), "helper()", "KeyError: 'k'"
+    )
     assert where_from_json(where_json(where)) == where
 
 

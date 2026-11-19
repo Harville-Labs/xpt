@@ -305,18 +305,19 @@ FAILED tests/test_io.py::test_load  tests/test_io.py:8 > src/app/io.py:12 read_c
   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   caused by: FileNotFoundError: [Errno 2] No such file or directory: 'app.toml'
 FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
-  also fails: [1] [3] [4]
   > assert double(x) == x + 2
   AssertionError: assert (0 * 2) == (0 + 2)
   stdout: debug line 0
-7 failed, 2 passed in 0.31s. Next: xpt accept a81f
+  also fails: tests/test_math.py::test_double[1]  assert (1 * 2) == (1 + 2)
+  also fails: tests/test_math.py::test_double[3]  assert (3 * 2) == (3 + 2)
+6 failed, 2 passed in 0.31s. Next: xpt accept a81f
 ```
 
 - Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. When the error is raised in a helper, the header shows the chain of project frames from the test down instead, as `path:line > path:line function`, keeping the first frame and the three nearest the error. The test's own name is left out because the node id has it. The next line is the source line at the deepest frame, after `> `. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
 - An `expect()` failure shows its short id, its status, and the path diff.
 - A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars, unsupported values, and other operators keep pytest's explanation.
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
-- Parametrized cases that fail at the same line with the same kind of error fold into the first case, and `also fails:` lists the rest.
+- Parametrized cases that fail at the same line with the same kind of error fold into the first case. Each other case gets an `also fails:` line with its full node id, which can be pasted into a pytest command, and the first detail line where it differs from the first case, without the shared exception type. The default limit of 10 applies, and the rest are counted.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
 - The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.

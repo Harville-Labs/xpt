@@ -1,8 +1,8 @@
-# expectkit design
+# xpt design
 
-Status: draft for review. Working name `expectkit`, because `expect` is taken on PyPI.
+Status: draft for review. Package and CLI name `xpt`. `expect`, `expectly`, `pyexpect`, and `expt` are taken on PyPI.
 
-expectkit is an inline expect-testing library for Python. A test calls `expect(actual)` or `expect(actual, expected)`. When the value is missing or different, the run records what it saw. A separate command shows the difference and writes an accepted value into the test source, without running the tests again.
+xpt is an inline expect-testing library for Python. A test calls `expect(actual)` or `expect(actual, expected)`. When the value is missing or different, the run records what it saw. A separate command shows the difference and writes an accepted value into the test source, without running the tests again.
 
 It is built for coding agents and must stay just as usable by people. It needs no model, network service, or agent framework.
 
@@ -12,7 +12,7 @@ The guiding question for every decision: does this make writing, running, unders
 
 We read the source of all four projects (default branch, November 2026). File references are in `docs/research.md`.
 
-| Capability | expecttest | inline-snapshot | syrupy | ApprovalTests | expectkit |
+| Capability | expecttest | inline-snapshot | syrupy | ApprovalTests | xpt |
 |---|---|---|---|---|---|
 | Inline expectations in test source | Strings only | Yes, any value | No | Docstrings only | Yes, any supported value |
 | Native values, not strings | No | Yes | Yes (external) | JSON or text | Yes |
@@ -36,7 +36,7 @@ What is not new, and we should say so:
 - Pluggable serializers, sorted output, cycle limits, and path matchers. syrupy has them.
 - Detecting conflicting values from one call site. expecttest does it within one process.
 
-What we found in none of them, which is where expectkit differs:
+What we found in none of them, which is where xpt differs:
 
 1. One observation per assertion, persisted across processes, with list, show, accept, and reject for each change.
 2. Stale-source detection before any write.
@@ -58,13 +58,13 @@ Changing either would be a rewrite of its core, not a pull request. We should st
 
 The brief was a good starting point. These parts of it change.
 
-1. **Recording is on by default. There is no `--expect-record` flag.** The point is to avoid a second test run. If an agent must rerun with `--expect-record` after a plain `pytest` fails, the flag costs the very run we are trying to save. Every run writes its failed and missing observations to `.expect/`, which is gitignored. `--expect-no-record` turns this off. The cost is a few kilobytes per failing assertion. The privacy cost is no worse than pytest's own failure output, which already prints the same values. `expect clean` deletes the directory.
-2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `expect accept`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks.
+1. **Recording is on by default. There is no `--expect-record` flag.** The point is to avoid a second test run. If an agent must rerun with `--expect-record` after a plain `pytest` fails, the flag costs the very run we are trying to save. Every run writes its failed and missing observations to `.expect/`, which is gitignored. `--expect-no-record` turns this off. The cost is a few kilobytes per failing assertion. The privacy cost is no worse than pytest's own failure output, which already prints the same values. `xpt clean` deletes the directory.
+2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks.
 3. **No LibCST.** The prototype in `docs/prototypes/` shows that the standard library is enough. `code.co_positions()` (Python 3.11+) gives the exact span of the running call. `ast` gives the span of each argument. A byte-offset splice replaces only the expected argument, so comments, formatting, and every other line stay untouched. LibCST would add a native wheel and a YAML dependency to rewrite one argument we can already locate exactly. We still parse the result with `compile()` before writing.
 4. **No runtime dependencies.** pytest is optional. `executing` and `asttokens`, which inline-snapshot uses, are not needed on Python 3.11+.
 5. **Python 3.11 is the floor.** 3.10 reached end of life in October 2026, and 3.11 brings `co_positions` and `co_qualname`.
 6. **JSON Lines files, not SQLite.** Each process writes its own file, so there is no shared write target and no lock (see Persistence).
-7. **The CLI is `expectkit`, with `python -m expectkit` as a fallback.** A command named `expect` would collide with the Tcl `expect` tool that many systems install.
+7. **The CLI is `xpt`, with `python -m xpt` as a fallback.** A command named `expect` would collide with the Tcl `expect` tool that many systems install.
 8. **Benchmarking agent efficiency is its own project phase, not an MVP requirement.** It is the claim the project lives or dies on, so it gets a real harness (milestone M5) instead of a spreadsheet of guesses.
 
 ## Data shapes
@@ -138,13 +138,13 @@ pytest run
             -> fail: Observation appended to .expect/runs/<run>/<worker>.jsonl
   session end: compact summary, nonzero exit if anything failed or was missing
 
-expectkit failures [--json]       read the latest run, group by id, print one line per id
-expectkit show <id> [--json]      the changes for one id, paths only, with limits
-expectkit show <id> --full        both whole values
-expectkit accept <id>... [--dry-run]
-expectkit accept --missing        fill every missing expectation, nothing else
-expectkit reject <id>...
-expectkit clean
+xpt failures [--json]       read the latest run, group by id, print one line per id
+xpt show <id> [--json]      the changes for one id, paths only, with limits
+xpt show <id> --full        both whole values
+xpt accept <id>... [--dry-run]
+xpt accept --missing        fill every missing expectation, nothing else
+xpt reject <id>...
+xpt clean
 ```
 
 Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. Accept is idempotent. Running it twice leaves the file as it was after the first run, because the second run finds the fingerprint already matches the accepted value and has nothing to do.
@@ -172,11 +172,11 @@ SQLite would buy queries we do not need. It would also make concurrent writers o
 
 These are separate functions over the `Value` tree:
 
-- `serialize(obj) -> Value` turns a Python object into a tree. It raises `UnsupportedValue` with the path and type for anything it cannot represent: `result["handler"] is a function; expectkit cannot record it. Register an adapter or expect a field of it instead.` It detects cycles by `id()`.
+- `serialize(obj) -> Value` turns a Python object into a tree. It raises `UnsupportedValue` with the path and type for anything it cannot represent: `result["handler"] is a function; xpt cannot record it. Register an adapter or expect a field of it instead.` It detects cycles by `id()`.
 - `diff(expected, actual) -> [Change]` walks two trees. Dicts compare by key, sequences by index, sets as sorted members. The walk is pure and easy to test exhaustively.
 - `to_source(Value, indent, width) -> str` prints a tree as a Python literal. Dict order is kept as observed. Set members are sorted. Floats use `repr`, which round-trips. It fits on one line when possible, and otherwise uses one element per line with a trailing comma, so the output already matches ruff's format.
 
-Comparison is Python `==` on the reconstructed expected value, with `diff` used only to explain a failure. That keeps expectkit's results identical to what a human writing `assert actual == expected` would get.
+Comparison is Python `==` on the reconstructed expected value, with `diff` used only to explain a failure. That keeps xpt's results identical to what a human writing `assert actual == expected` would get.
 
 A dataclass prints as `Point(x=1, y=2)`. At record time we check that `Point` resolves to the same class in the test module's globals. If it does not, we mark the value unsupported instead of writing code that will raise `NameError`.
 
@@ -205,9 +205,9 @@ FAILED tests/test_parser.py::test_parser
     1 changed, 42 unchanged
 ```
 
-Limits: at most 10 changes per expectation, and values longer than 80 characters are cut with a length marker. `expectkit show` lifts both limits. The session footer prints one line: `3 expectations failed (2 mismatch, 1 missing). expectkit failures for details.`
+Limits: at most 10 changes per expectation, and values longer than 80 characters are cut with a length marker. `xpt show` lifts both limits. The session footer prints one line: `3 expectations failed (2 mismatch, 1 missing). xpt failures for details.`
 
-JSON is the same data with `"schema_version": 1`. Every CLI command takes `--json`. The CLI handlers are thin wrappers over a Python API (`expectkit.api.failures()`, `show()`, `accept()`), so an MCP server later is a fourth thin wrapper and not a redesign.
+JSON is the same data with `"schema_version": 1`. Every CLI command takes `--json`. The CLI handlers are thin wrappers over a Python API (`xpt.api.failures()`, `show()`, `accept()`), so an MCP server later is a fourth thin wrapper and not a redesign.
 
 ## Concurrency
 
@@ -222,14 +222,14 @@ JSON is the same data with `"schema_version": 1`. Every CLI command takes `--jso
 - **Generated or non-file sources** (doctests, notebooks, `python -c`): same as above.
 - **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets. `ignore=` and adapters cover the rest. Default `repr` of arbitrary objects is never used, because it embeds addresses.
 - **Large values.** Records are capped at 1 MB per observation by default. Larger values are recorded as a hash plus a summary and cannot be inline-accepted.
-- **Sensitive data.** `.expect/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `expectkit clean`. The README says so plainly.
+- **Sensitive data.** `.expect/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `xpt clean`. The README says so plainly.
 - **Python 3.11 floor** excludes 3.10 users. 3.10 is end of life, so this is acceptable.
 - **`co_positions` can be disabled** with `-X no_debug_ranges`. We detect `None` positions and fall back to line-only matching, refusing when a line holds more than one call.
 
 ## Minimum public API
 
 ```python
-from expectkit import expect
+from xpt import expect
 
 expect(actual)                    # missing: fails, records
 expect(actual, expected)          # compares with ==, records on mismatch
@@ -248,5 +248,5 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M2. Record and accept.** Call-site identity, JSON Lines recorder, `failures` / `show` / `accept` / `reject` / `clean`, fingerprint checks, atomic multi-edit writes, `--expect-create`. This is the differentiator and the MVP line.
 - **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests.
 - **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic extras with tolerances. An xdist test matrix.
-- **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and expectkit. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
+- **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **M6. Release.** Name check, docs, PyPI.

@@ -9,7 +9,7 @@ from xpt.group import Group
 from xpt.rewrite import rewrite
 from xpt.serialize import serialize
 from xpt.site import CallSite, arg_sha, find_call, scopes
-from xpt.value import Dataclass, Int, Ref, Seq, Str, Value
+from xpt.value import Dataclass, Float, Int, Ref, Seq, Str, Value
 
 
 def target(source: str, actual: Value) -> Group:
@@ -194,6 +194,19 @@ def test_a_nested_qualname_is_written_through_a_module_imported_from_its_package
     source = "from google.protobuf import descriptor_pb2\n\ndef test_it():\n    expect(make())\n"
     expected = "    expect(make(), descriptor_pb2.DescriptorProto.ExtensionRange())\n"
     assert rewritten(source, message).endswith(expected)
+
+
+def test_a_builtin_type_is_written_by_its_bare_name():
+    number = Dataclass("builtins:complex", (("real", Float("1.0")), ("imag", Float("2.0"))))
+    source = "def test_it():\n    expect(make())\n"
+    expected = "    expect(make(), complex(real=1.0, imag=2.0))\n"
+    assert rewritten(source, number).endswith(expected)
+
+
+def test_an_xpt_helper_is_written_through_the_expect_the_file_imports():
+    helper = Dataclass("xpt:expect.with_extensions", (("", Int(1)),))
+    source = "from xpt import expect\n\ndef test_it():\n    expect(make())\n"
+    assert rewritten(source, helper).endswith("    expect(make(), expect.with_extensions(1))\n")
 
 
 def test_an_adapter_value_whose_module_is_not_imported_is_skipped():

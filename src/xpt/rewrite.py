@@ -279,6 +279,8 @@ def _names(file: _File, value: Value, where: str) -> dict[str, str]:
 def _name(file: _File, type_id: str, where: str) -> str:
     module, _, qualname = type_id.partition(":")
     head, dot, rest = qualname.partition(".")
+    if module == "builtins":
+        return qualname
     if imported := file.modules.get(f"{module}.{head}"):
         return imported + dot + rest
     if alias := file.modules.get(module):

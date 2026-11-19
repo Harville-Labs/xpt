@@ -16,12 +16,13 @@ Pass `expected` as the second positional argument or as `expected=`. When accept
 | Type | Notes |
 |---|---|
 | `str`, `int`, `float`, `bool`, `None` | `True` and `1` are different values. `nan`, `inf`, and `-0.0` round-trip. |
+| `complex` | Written as `complex(real=1.0, imag=2.0)`. |
 | `list`, `tuple`, `dict` | Order is kept. Dict keys can be any supported value. |
 | `set`, `frozenset` | Members are sorted when written, so the source does not depend on hash order. |
 | Dataclasses | Must compare by value (`eq=True`, the default) and have every field in `__init__`. |
-| NumPy arrays and scalars, PyTorch tensors | Written as `np.array([...], dtype="float32")` or `torch.tensor([...], dtype=torch.float32)`. Up to 10,000 elements. Complex dtypes are refused. A NumPy scalar is recorded as the Python number it holds. |
-| pandas `Series` and `DataFrame` | Written as `pd.Series([...], dtype=..., name=..., index=[...])` and `pd.DataFrame({"col": [...]})`. A default index is left out. A named or multi-level index is refused, and so is a frame column whose dtype `pd.DataFrame` would not infer from its values. |
-| Pydantic models, attrs classes, protobuf messages | Written as a constructor call with keyword arguments: Pydantic by field alias, plus extra fields; attrs by `__init__` alias; protobuf by the fields that are set. |
+| NumPy arrays and scalars, PyTorch tensors | Written as `np.array([...], dtype="float32")` or `torch.tensor([...], dtype=torch.float32)`. Up to 10,000 elements. Complex dtypes are written with `complex(...)` elements. A tensor on a device other than the CPU adds `device="mps:0"`. A NumPy scalar is recorded as the Python number it holds. |
+| pandas `Series` and `DataFrame` | Written as `pd.Series([...], dtype=..., name=..., index=[...])` and `pd.DataFrame({"col": [...]})`. A default index is left out. A named index, or one whose dtype pandas would not infer, is written as `pd.Index([...], dtype=..., name=...)`, and a multi-level one as `pd.MultiIndex.from_tuples([...], names=[...])`. Multi-level columns are tuple keys. A frame column whose dtype `pd.DataFrame` would not infer from its values is refused. |
+| Pydantic models, attrs classes, protobuf messages | Written as a constructor call with keyword arguments: Pydantic by field alias, plus extra fields; attrs by `__init__` alias; protobuf by the fields that are set. A protobuf message that sets extensions is wrapped as `expect.with_extensions(msg, extensions={"pkg.name": value})`. |
 
 Anything else fails with a message that names where the value is and its type:
 
@@ -38,7 +39,7 @@ Subclasses of builtins, such as an `IntEnum` member, are refused rather than rec
 
 ## Comparison
 
-A call passes when `actual == expected`. Arrays, tensors, and pandas objects are the exception, because their `==` compares element by element: they pass only when both sides have the same type, shape, and dtype and every element is equal, and a pandas object must also have an equal index. A `nan` element never equals itself, as with plain floats. Lists, tuples, dicts, and dataclasses that hold arrays are compared item by item the same way. Tolerances (`atol`, `rtol`) are not supported yet. When it fails, the diff and the grouping of repeated calls use the same structural equality, so `1` and `1.0` are equal. A dataclass is compared field by field, and its class must be the same.
+A call passes when `actual == expected`. Arrays, tensors, and pandas objects are the exception, because their `==` compares element by element: they pass only when both sides have the same type, shape, and dtype and every element is equal. A tensor must also be on the same device, and a pandas object must have an equal index, with the same names and dtype. `nan` equals `nan`, both as a plain float and as an array element in the same place, so a recorded `float("nan")` passes. Lists, tuples, dicts, and dataclasses that hold arrays are compared item by item the same way. Tolerances (`atol`, `rtol`) are not supported yet. When it fails, the diff and the grouping of repeated calls use the same structural equality, so `1` and `1.0` are equal. A dataclass is compared field by field, and its class must be the same.
 
 A record over 1 MB keeps its status but drops both values. Expect a smaller part of the value instead.
 

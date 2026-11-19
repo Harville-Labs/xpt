@@ -70,7 +70,7 @@ def test_a_protobuf_field_set_on_one_side_reads_as_added():
 
 def note_extensions():
     descriptor_pb2 = pytest.importorskip("google.protobuf.descriptor_pb2")
-    from google.protobuf import descriptor_pool
+    descriptor_pool = pytest.importorskip("google.protobuf.descriptor_pool")
 
     pool = descriptor_pool.Default()
     try:

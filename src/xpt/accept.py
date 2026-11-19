@@ -4,7 +4,7 @@ import os
 import secrets
 import shutil
 from collections import defaultdict
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +51,20 @@ def accept(root: Path, groups: Iterable[Group], *, dry_run: bool = False) -> Acc
             if done.changed:
                 changed.append(path)
     return AcceptResult(tuple(outcomes[i] for i in range(len(given))), tuple(changed))
+
+
+def create(root: Path, groups: Sequence[Group]) -> AcceptResult:
+    """Accept missing groups the way `pytest --expect-create` does after the session.
+
+    A held lock skips every group with the lock's message instead of raising, so the session
+    still ends with its report.
+    """
+    if not groups:
+        return AcceptResult((), ())
+    try:
+        return accept(root, groups)
+    except AcceptError as error:
+        return AcceptResult(tuple(Outcome(g, "skipped", str(error)) for g in groups), ())
 
 
 @dataclass(frozen=True, slots=True)

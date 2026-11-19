@@ -47,6 +47,11 @@ class Group:
         return self.acceptable and not self.rejected
 
 
+def missing(groups: Iterable[Group]) -> list[Group]:
+    """The groups whose expected argument is empty and whose value was not rejected."""
+    return [g for g in groups if g.status == "missing" and not g.rejected]
+
+
 def group(observations: Iterable[Observation]) -> tuple[Group, ...]:
     """Group a run's observations by call site, in path, line, and ordinal order."""
     located: dict[SiteKey, list[tuple[CallSite, Observation]]] = defaultdict(list)

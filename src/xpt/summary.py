@@ -4,13 +4,14 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from xpt.accept import AcceptResult
 from xpt.decisions import Rejection, mark
 from xpt.diff import Diff, diff
 from xpt.failure import Compared, Expected, Failure, Raised, Text, Where, where_json
 from xpt.group import Group, group
-from xpt.render import change_json, group_json
+from xpt.render import accept_json, change_json, group_json
 from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
-from xpt.site import SiteKey, Unlocatable
+from xpt.site import CallSite, SiteKey, Unlocatable
 from xpt.value import Json
 
 SCHEMA_VERSION = 1
@@ -42,7 +43,8 @@ def limits(verbosity: int) -> Limits:
 
 @dataclass(frozen=True, slots=True)
 class Session:
-    """A finished pytest session, as the report needs it."""
+    """A finished pytest session, as the report needs it. `created` is what
+    `--expect-create` wrote after the session, None without the flag."""
 
     failures: tuple[Failure, ...]
     counts: tuple[str, ...]
@@ -50,6 +52,7 @@ class Session:
     exit_code: int
     run: str | None
     rejected: frozenset[Rejection] = frozenset()
+    created: AcceptResult | None = None
 
 
 def expect_groups(session: Session) -> dict[SiteKey, Group]:
@@ -70,14 +73,40 @@ def report_lines(session: Session, lim: Limits) -> Lines:
 def footer(session: Session, groups: dict[SiteKey, Group]) -> str:
     counts = ", ".join(session.counts) or "no tests ran"
     line = f"{counts} in {session.seconds:.2f}s."
-    if session.run is None or not any(
-        isinstance(f.where.detail, Expected) for f in session.failures
-    ):
+    observed = [
+        d.observation for f in session.failures if isinstance(d := f.where.detail, Expected)
+    ]
+    if session.run is None or not observed:
         return line
-    ids = sorted(g.id for g in groups.values() if g.offered and g.id is not None)
+    written: set[SiteKey] = set()
+    if session.created is not None:
+        written = {s.key for s in _sites(session.created, "accepted", "already_accepted")}
+        filled = filled_line(session.created)
+        line = f"{line} {filled}" if filled else line
+    ids = sorted(g.id for key, g in groups.items() if g.offered and g.id and key not in written)
     if ids:
         return f"{line} Next: xpt accept {' '.join(ids)}"
+    if all(isinstance(o.site, CallSite) and o.site.key in written for o in observed):
+        return f"{line} Next: run the tests."
     return f"{line} Next: xpt failures"
+
+
+def filled_line(created: AcceptResult) -> str | None:
+    """`Filled N missing expectations: path:line ...`, or None when nothing was written."""
+    sites = _sites(created, "accepted")
+    if not sites:
+        return None
+    noun = "expectation" if len(sites) == 1 else "expectations"
+    where = " ".join(f"{s.path}:{s.line}" for s in sites)
+    return f"Filled {len(sites)} missing {noun}: {where}."
+
+
+def _sites(created: AcceptResult, *statuses: str) -> list[CallSite]:
+    return [
+        o.group.site
+        for o in created.outcomes
+        if o.status in statuses and isinstance(o.group.site, CallSite)
+    ]
 
 
 def _entries(failures: Sequence[Failure]) -> list[tuple[Failure, list[str]]]:
@@ -199,6 +228,7 @@ def report_json(session: Session) -> dict[str, Json]:
         "counts": list(session.counts),
         "duration": session.seconds,
         "run": session.run,
+        "created": None if session.created is None else accept_json(session.created),
         "failures": [_failure_json(f, groups) for f in session.failures],
     }
 

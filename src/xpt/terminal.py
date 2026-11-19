@@ -10,8 +10,11 @@ import pytest
 from _pytest import timing
 
 from xpt import decisions, record
+from xpt.accept import AcceptResult
 from xpt.failure import Failure, Text, Where, streams, where_from_json
 from xpt.summary import Session, limits, report_json, report_lines
+
+CREATED = pytest.StashKey[AcceptResult]()
 
 _SUMMARY_EXIT_CODES = (
     pytest.ExitCode.OK,
@@ -143,6 +146,7 @@ class AgentReporter(pytest.TerminalReporter):  # ty: ignore[subclass-of-final-cl
             exit_code=int(session.exitstatus),
             run=run,
             rejected=self._rejected() if run else frozenset(),
+            created=self.config.stash.get(CREATED, None),
         )
 
     def _rejected(self) -> frozenset[decisions.Rejection]:

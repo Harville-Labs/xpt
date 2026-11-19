@@ -321,6 +321,7 @@ def test_ok():
         "exit_code": 1,
         "summary": data["summary"],
         "counts": ["1 failed", "1 passed"],
+        "created": None,
     }
     assert DURATION.sub(" in 0.00s", data["summary"]) == (
         "1 failed, 1 passed in 0.00s. Next: xpt accept " + failure["group"]["id"]

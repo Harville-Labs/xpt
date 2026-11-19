@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import NoReturn
 
 from xpt import decisions, render
-from xpt.accept import AcceptError, accept, lock
-from xpt.group import Group, group
+from xpt.accept import AcceptError, AcceptResult, accept, lock
+from xpt.group import Group, group, missing
 from xpt.record import (
     DIRECTORY,
     SCHEMA_VERSION,
@@ -94,25 +94,21 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
     if args.all:
         groups, target = [g for g in run.groups if not g.rejected], "--all"
     elif args.missing:
-        groups = [g for g in run.groups if g.status == "missing" and not g.rejected]
-        target = "--missing"
+        groups, target = missing(run.groups), "--missing"
     else:
         groups, target = _pick(run, args.ids), " ".join(args.ids)
     data: dict[str, Json] = {"run": run.id, "dry_run": args.dry_run}
     if not groups:
-        return Output(0, [f"Nothing to accept in run {run.id}."], data | _accepted([], []))
+        empty = render.accept_json(AcceptResult((), ()))
+        return Output(0, [f"Nothing to accept in run {run.id}."], data | empty)
     result = accept(root, groups, dry_run=args.dry_run)
     written = all(o.status in ("accepted", "already_accepted") for o in result.outcomes)
     retry = f"xpt accept{run.run_option} {target}"
     return Output(
         0 if written else 1,
         render.accept_lines(result, args.dry_run, retry),
-        data | _accepted([render.outcome_json(o) for o in result.outcomes], result.changed),
+        data | render.accept_json(result),
     )
-
-
-def _accepted(outcomes: list[Json], changed: Sequence[str]) -> dict[str, Json]:
-    return {"outcomes": outcomes, "changed": list(changed)}
 
 
 def reject(args: argparse.Namespace, root: Path) -> Output:

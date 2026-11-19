@@ -35,6 +35,10 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 [tool.ty.src]
 exclude = ["docs/prototypes"]
 
+[tool.ty.environment]
+extra-paths = ["tests"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 addopts = ["--strict-markers", "-p", "no:cacheprovider"]

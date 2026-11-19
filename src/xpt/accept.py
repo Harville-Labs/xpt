@@ -27,12 +27,12 @@ class AcceptError(Exception):
     pass
 
 
-def accept(root: Path, groups: Iterable[Group]) -> AcceptResult:
+def accept(root: Path, groups: Iterable[Group], *, dry_run: bool = False) -> AcceptResult:
     """Write each acceptable group's actual value into its source file as the expected value.
 
     A group is written only when its expected argument's text still matches the run. Each
     file is rewritten in one pass to a temporary file and moved into place, under an
-    exclusive `.xpt/accept.lock`.
+    exclusive `.xpt/accept.lock`. A dry run reports the same result and writes nothing.
     """
     given = tuple(groups)
     outcomes: dict[int, Outcome] = {}
@@ -44,9 +44,9 @@ def accept(root: Path, groups: Iterable[Group]) -> AcceptResult:
         else:
             by_path[site.path].append(i)
     changed = []
-    with _lock(state_directory(root) / "accept.lock"):
+    with lock(state_directory(root) / "accept.lock"):
         for path, indexes in sorted(by_path.items()):
-            done = _accept_file(root, path, [given[i] for i in indexes])
+            done = _accept_file(root, path, [given[i] for i in indexes], dry_run)
             outcomes.update(zip(indexes, done.outcomes, strict=True))
             if done.changed:
                 changed.append(path)
@@ -59,7 +59,7 @@ class _FileResult:
     changed: bool
 
 
-def _accept_file(root: Path, path: str, groups: list[Group]) -> _FileResult:
+def _accept_file(root: Path, path: str, groups: list[Group], dry_run: bool) -> _FileResult:
     def skipped(reason: str) -> _FileResult:
         return _FileResult(tuple(Outcome(g, "skipped", reason) for g in groups), False)
 
@@ -75,6 +75,8 @@ def _accept_file(root: Path, path: str, groups: list[Group]) -> _FileResult:
     planned = rewrite(path, data, groups)
     if planned.data == data:
         return _FileResult(planned.outcomes, False)
+    if dry_run:
+        return _FileResult(planned.outcomes, True)
     try:
         _replace(file, planned.data)
     except OSError as error:
@@ -93,7 +95,7 @@ def _replace(file: Path, data: bytes) -> None:
 
 
 @contextmanager
-def _lock(lock: Path) -> Generator[None]:
+def lock(lock: Path) -> Generator[None]:
     try:
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:

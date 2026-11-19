@@ -337,14 +337,14 @@ def test_ids_stay_the_same_when_lines_move(tmp_path: Path):
 
 
 def test_site_id_is_the_sha256_of_the_identity_key():
-    site = CallSite("tests/test_a.py", "test_x", 2, sha("1"), 10)
-    assert site_id(site) == sha(json.dumps(["tests/test_a.py", "test_x", 2]))
-    assert site_id(site) == site_id(CallSite("tests/test_a.py", "test_x", 2, "", 99))
+    site = CallSite("tests/test_a.py", "test_x", "expect", 2, sha("1"), 10)
+    assert site_id(site) == sha(json.dumps(["tests/test_a.py", "test_x", "expect", 2]))
+    assert site_id(site) == site_id(CallSite("tests/test_a.py", "test_x", "expect", 2, "", 99))
 
 
 def test_short_ids_are_four_characters_and_lengthen_on_a_collision():
     def site(ordinal: int) -> CallSite:
-        return CallSite("tests/test_a.py", "test_x", ordinal, "", 1)
+        return CallSite("tests/test_a.py", "test_x", "expect", ordinal, "", 1)
 
     seen: dict[str, int] = {}
     for ordinal in itertools.count():
@@ -358,7 +358,30 @@ def test_short_ids_are_four_characters_and_lengthen_on_a_collision():
     full_a, full_b = site_id(a), site_id(b)
     common = next(i for i, (x, y) in enumerate(zip(full_a, full_b, strict=True)) if x != y)
     assert ids == {
-        ("tests/test_a.py", "test_x", a.ordinal): full_a[: common + 1],
-        ("tests/test_a.py", "test_x", b.ordinal): full_b[: common + 1],
-        ("tests/test_a.py", "test_x", other.ordinal): site_id(other)[:4],
+        ("tests/test_a.py", "test_x", "expect", a.ordinal): full_a[: common + 1],
+        ("tests/test_a.py", "test_x", "expect", b.ordinal): full_b[: common + 1],
+        ("tests/test_a.py", "test_x", "expect", other.ordinal): site_id(other)[:4],
     }
+
+
+def test_a_helper_call_and_an_expect_call_at_the_same_ordinal_have_different_ids(tmp_path: Path):
+    helper, direct = located(
+        tmp_path,
+        """
+        def check(value):
+            SITES.append(call_site(1, ROOT))
+
+        def test_both():
+            check(1)
+            expect(2)
+
+        test_both()
+        """,
+    )
+    assert (helper.callee, helper.ordinal, direct.callee, direct.ordinal) == (
+        "check",
+        0,
+        "expect",
+        0,
+    )
+    assert site_id(helper) != site_id(direct)

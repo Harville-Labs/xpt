@@ -8,7 +8,7 @@ from xpt.site import CallSite, Unlocatable
 from xpt.value import Int, Str
 
 SHA = "ab" * 32
-SITE = CallSite("tests/test_a.py", "test_a", 0, SHA, 7)
+SITE = CallSite("tests/test_a.py", "test_a", "expect", 0, SHA, 7)
 
 
 def seen(test: str = "tests/test_a.py::test_a", **changes: object) -> Observation:
@@ -41,7 +41,7 @@ def test_one_failing_call_makes_one_acceptable_group():
 
 
 def with_sha(sha: str) -> CallSite:
-    return CallSite(SITE.path, SITE.qualname, SITE.ordinal, sha, SITE.line)
+    return CallSite(SITE.path, SITE.qualname, SITE.callee, SITE.ordinal, sha, SITE.line)
 
 
 def test_a_missing_expectation_groups_as_missing_and_acceptable():
@@ -124,17 +124,17 @@ def test_unlocatable_calls_with_different_reasons_stay_apart():
 
 
 def test_short_ids_are_unique_and_at_least_four_characters():
-    sites = [CallSite("t.py", f"test_{i}", 0, SHA, i) for i in range(300)]
+    sites = [CallSite("t.py", f"test_{i}", "expect", 0, SHA, i) for i in range(300)]
     ids = [g.id for g in group(seen(site=s) for s in sites)]
     assert len(set(ids)) == 300
     assert all(i is not None and len(i) >= 4 for i in ids)
 
 
 def test_groups_are_ordered_by_path_then_line_then_ordinal():
-    b = CallSite("b.py", "t", 0, SHA, 1)
-    a_late = CallSite("a.py", "t", 0, SHA, 20)
-    a_early_second = CallSite("a.py", "u", 1, SHA, 5)
-    a_early_first = CallSite("a.py", "u", 0, SHA, 5)
+    b = CallSite("b.py", "t", "expect", 0, SHA, 1)
+    a_late = CallSite("a.py", "t", "expect", 0, SHA, 20)
+    a_early_second = CallSite("a.py", "u", "expect", 1, SHA, 5)
+    a_early_first = CallSite("a.py", "u", "expect", 0, SHA, 5)
     lost = Unlocatable("gone", "a.py", 10)
     found = group(seen(site=s) for s in (b, lost, a_late, a_early_second, a_early_first))
     assert [g.site for g in found] == [a_early_first, a_early_second, lost, a_late, b]
@@ -144,14 +144,14 @@ EVERY_CASE = [
     seen("t.py::a"),
     seen("t.py::b"),
     seen("t.py::c", actual=Int(3)),
-    seen("t.py::d", site=CallSite("t.py", "test_d", 0, SHA, 30)),
-    seen("t.py::d", site=CallSite("t.py", "test_d", 0, "cd" * 32, 31)),
-    seen("t.py::e", site=CallSite("u.py", "test_e", 1, SHA, 4), actual=Str("x")),
-    seen("t.py::e", site=CallSite("u.py", "test_e", 1, SHA, 4), actual=Str("x")),
+    seen("t.py::d", site=CallSite("t.py", "test_d", "expect", 0, SHA, 30)),
+    seen("t.py::d", site=CallSite("t.py", "test_d", "expect", 0, "cd" * 32, 31)),
+    seen("t.py::e", site=CallSite("u.py", "test_e", "expect", 1, SHA, 4), actual=Str("x")),
+    seen("t.py::e", site=CallSite("u.py", "test_e", "expect", 1, SHA, 4), actual=Str("x")),
     seen("t.py::f", site=Unlocatable("gone", "u.py", 2), actual=None, status="unsupported"),
     seen("t.py::g", site=Unlocatable("gone", "u.py", 2)),
-    seen("t.py::h", site=CallSite("v.py", "test_h", 0, SHA, 1), expected=Int(2)),
-    seen("t.py::i", site=CallSite("v.py", "test_h", 0, SHA, 1), expected=Int(3)),
+    seen("t.py::h", site=CallSite("v.py", "test_h", "expect", 0, SHA, 1), expected=Int(2)),
+    seen("t.py::i", site=CallSite("v.py", "test_h", "expect", 0, SHA, 1), expected=Int(3)),
 ]
 
 

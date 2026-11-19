@@ -265,7 +265,7 @@ SQLite would buy queries we do not need. It would also make concurrent writers o
 
 These are separate functions over the `Value` tree:
 
-- `serialize(obj) -> Value` turns a Python object into a tree. It raises `UnsupportedValue` with the path and type for anything it cannot represent: `result["handler"] is a function; xpt cannot record it. Register an adapter or expect a field of it instead.` It detects cycles by `id()`.
+- `serialize(obj) -> Value` turns a Python object into a tree. It raises `UnsupportedValue` with the path and type for anything it cannot represent: `result["handler"] is a function; xpt cannot record it. Register its class with xpt.register or expect a field of it instead.` It detects cycles by `id()`.
 - `diff(expected, actual) -> [Change]` walks two trees. Dicts compare by key, sequences by index, sets as sorted members. The walk is pure and easy to test exhaustively.
 - `to_source(Value, indent, width) -> str` prints a tree as a Python literal. Dict order is kept as observed. Set members are sorted. Floats use `repr`, which round-trips. It fits on one line when possible, and otherwise uses one element per line with a trailing comma, so the output already matches ruff's format.
 
@@ -275,7 +275,7 @@ A dataclass prints as `Point(x=1, y=2)`. At record time we check that `Point` re
 
 Adapters (`src/xpt/adapters.py`) turn NumPy, PyTorch, pandas, Pydantic, attrs, and protobuf values into the same constructor-call node a dataclass uses, so `diff`, `to_source`, and accept need no adapter code. `np.array([[1, 2]], dtype="int64")` is `{"numpy:array": {"": [[1, 2]], "dtype": "int64"}}`. The field named `""` is the positional argument and adds no step to a diff path, so a changed element reads `value[0][1]`. A dtype that must be a name rather than a string, such as `torch.float32`, is a `ref` node. Fields are matched by name in a diff, so a protobuf field set on only one side reads as added or removed.
 
-The registry maps a class name such as `numpy.ndarray` to its adapter and is searched through the value's MRO. xpt never imports the libraries, so there are no extras and no runtime dependencies; the adapter runs only on objects that already exist. There is no public `register` yet.
+The registry maps a class name such as `numpy.ndarray` to its adapter and is searched through the value's MRO. xpt never imports the libraries, so there are no extras and no runtime dependencies; the adapter runs only on objects that already exist. `xpt.register(cls, fields)` adds a user adapter that is checked first, by exact class, and writes `cls(**fields(obj))`. It requires `cls` to define `__eq__`, because a rebuilt object that compares by identity never equals the original.
 
 Comparison is `==` everywhere except for arrays, tensors, and pandas objects, whose `==` is element-wise and broadcasts: `np.array([1]) == np.array([[1.0]])` is truthy. `equal` (`src/xpt/equal.py`) compares those by type, shape, dtype, and elements, and walks lists, tuples, dicts, and dataclasses item by item so an array nested in a dict is held to the same rule.
 

@@ -88,7 +88,7 @@ def test_an_unsupported_type_names_the_path_and_the_type():
         serialize({"handler": print})
     assert str(e.value) == (
         'value["handler"] is a builtins:builtin_function_or_method; xpt cannot record it. '
-        "Register an adapter or expect a field of it instead."
+        "Register its class with xpt.register or expect a field of it instead."
     )
 
 

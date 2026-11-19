@@ -9,8 +9,9 @@ from __future__ import annotations
 import keyword
 import struct
 import sys
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
+from functools import partial
+from typing import Any, TypeVar
 
 from xpt import digest
 from xpt.digest import Digest
@@ -24,10 +25,28 @@ LIMIT = 10_000
 Recurse = Callable[[object, Path], Value]
 Adapter = Callable[[Any, Path, Recurse], Value]
 
+T = TypeVar("T")
+
 _PACK = {"float32": "f", "float16": "e", "complex64": "f", "complex32": "e"}
 
 
+def register(cls: type[T], fields: Callable[[T], Mapping[str, object]]) -> None:
+    """Record instances of `cls` as `cls(**fields(obj))` and compare them with `cls.__eq__`.
+
+    A registration takes precedence over xpt's own handling of the class, applies to `cls`
+    alone and not its subclasses, and replaces an earlier registration of the same class.
+    """
+    if cls.__eq__ is object.__eq__:
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} has no __eq__, so a rebuilt one never equals "
+            "the original. Define __eq__ before registering it."
+        )
+    _REGISTERED[cls] = fields
+
+
 def find(cls: type) -> Adapter | None:
+    if (fields := _REGISTERED.get(cls)) is not None:
+        return partial(_registered, fields)
     for base in cls.__mro__:
         if adapter := _ADAPTERS.get(f"{base.__module__}.{base.__qualname__}"):
             return adapter
@@ -296,13 +315,33 @@ def _message(obj: Any, path: Path, recurse: Recurse) -> Value:
     )
 
 
-def _keyword(name: str, cls: type, path: Path) -> str:
-    if not name.isidentifier() or keyword.iskeyword(name):
+def _registered(fields: Callable[[Any], object], obj: Any, path: Path, recurse: Recurse) -> Value:
+    cls = type(obj)
+    found = fields(obj)
+    if not isinstance(found, Mapping):
+        raise UnsupportedValue(
+            path,
+            f"is a {type_name(cls)} whose registered fields returned a "
+            f"{type(found).__name__}, not a dict",
+        )
+    return Dataclass(
+        type_name(cls),
+        tuple(
+            (_keyword(name, cls, path), recurse(value, (*path, Attr(name))))
+            for name, value in found.items()
+        ),
+    )
+
+
+def _keyword(name: object, cls: type, path: Path) -> str:
+    if not (isinstance(name, str) and name.isidentifier()) or keyword.iskeyword(name):
         raise UnsupportedValue(
             path, f"is a {type_name(cls)} whose field {name!r} is not a keyword argument"
         )
     return name
 
+
+_REGISTERED: dict[type, Callable[[Any], object]] = {}
 
 _ADAPTERS: dict[str, Adapter] = {
     "numpy.ndarray": _ndarray,

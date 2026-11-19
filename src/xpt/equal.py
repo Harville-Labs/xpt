@@ -4,7 +4,8 @@ import dataclasses
 import math
 from typing import Any
 
-from xpt import adapters
+from xpt import adapters, digest
+from xpt.digest import Digest
 from xpt.tolerance import EXACT, Tolerance
 
 
@@ -17,6 +18,10 @@ def equal(a: Any, b: Any, tol: Tolerance = EXACT) -> bool:
     Lists, tuples, dicts, and dataclasses are compared item by item so an array inside one
     is compared the same way.
     """
+    if isinstance(b, Digest):
+        return digest.of(a) == b
+    if isinstance(a, Digest):
+        return digest.of(b) == a
     same = adapters.same(a, b, tol)
     if same is not None:
         return same

@@ -12,6 +12,8 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from xpt import digest
+from xpt.digest import Digest
 from xpt.path import Attr, Key, Path
 from xpt.tolerance import Tolerance
 from xpt.unsupported import UnsupportedValue, type_name
@@ -53,13 +55,17 @@ def _ndarray(obj: Any, path: Path, recurse: Recurse) -> Value:
     dtype = obj.dtype
     if dtype.kind not in "biufcU" or dtype.name in ("float128", "complex256"):
         raise UnsupportedValue(path, f"is a numpy array of dtype {dtype.name}")
+    if obj.size > LIMIT:
+        return _digest(digest.of_numpy(obj), path, recurse)
     name = dtype.str if dtype.kind == "U" else dtype.name
     return _array("numpy", obj.shape, obj.size, obj.tolist, Str(name), (), path, recurse)
 
 
 def _tensor(obj: Any, path: Path, recurse: Recurse) -> Value:
+    if obj.numel() > LIMIT:
+        return _digest(digest.of_torch(obj), path, recurse)
     values = obj.detach().cpu().tolist
-    ref = Ref(str(obj.dtype).replace(".", ":", 1))
+    ref = _torch_dtype(obj.dtype)
     device = () if obj.device.type == "cpu" else (("device", Str(str(obj.device))),)
     return _array("torch", tuple(obj.shape), obj.numel(), values, ref, device, path, recurse)
 
@@ -74,10 +80,6 @@ def _array(
     path: Path,
     recurse: Recurse,
 ) -> Value:
-    if size > LIMIT:
-        raise UnsupportedValue(
-            path, f"is a {module} array of {size} elements, more than the {LIMIT} xpt writes inline"
-        )
     if size == 0 and len(shape) > 1:
         dims = Seq("tuple", tuple(Int(n) for n in shape))
         return Dataclass(f"{module}:zeros", (("", dims), ("dtype", dtype), *extra))
@@ -87,6 +89,23 @@ def _array(
         items = _shorten(items, pack)
     ctor = "array" if module == "numpy" else "tensor"
     return Dataclass(f"{module}:{ctor}", (("", items), ("dtype", dtype), *extra))
+
+
+def _torch_dtype(dtype: object) -> Ref:
+    return Ref(str(dtype).replace(".", ":", 1))
+
+
+def _digest(d: Digest, path: Path, recurse: Recurse) -> Value:
+    dtype = _torch_dtype(d.dtype) if d.kind == "torch" else Str(d.dtype)
+    shape = Seq("tuple", tuple(Int(n) for n in d.shape))
+    fields: list[tuple[str, Value]] = [("kind", Str(d.kind)), ("shape", shape), ("dtype", dtype)]
+    if d.device:
+        fields.append(("device", Str(d.device)))
+    fields.append(("sha256", Str(d.sha256)))
+    for name in ("min", "max", "mean"):
+        if (stat := getattr(d, name)) is not None:
+            fields.append((name, recurse(stat, (*path, Attr(name)))))
+    return Dataclass("xpt:expect.digest", tuple(fields))
 
 
 def _shorten(value: Value, pack: str) -> Value:
@@ -293,6 +312,7 @@ _ADAPTERS: dict[str, Adapter] = {
     "pandas.DataFrame": _frame,
     "pydantic.main.BaseModel": _model,
     "google.protobuf.message.Message": _message,
+    "xpt.digest.Digest": _digest,
 }
 
 _EQUALITY: dict[str, Callable[[Any, Any, Tolerance], bool]] = {

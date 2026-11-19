@@ -3,12 +3,15 @@ from support import assert_rebuilds
 
 from xpt import expect
 from xpt.equal import equal
+from xpt.serialize import serialize
+from xpt.source import to_source
 from xpt.tolerance import Tolerance
 
 torch = pytest.importorskip("torch")
 
 NAMES = {"torch:tensor": "torch.tensor", "torch:zeros": "torch.zeros"}
 SCOPE = {"torch": torch}
+DIGEST = {"xpt:expect.digest": "expect.digest"}
 
 
 def names(*dtypes: str) -> dict[str, str]:
@@ -70,3 +73,14 @@ def test_a_float_tensor_within_atol_passes_and_an_integer_one_stays_exact():
     expect(torch.tensor([1.0, 2.0004]), torch.tensor([1.0, 2.0]), atol=1e-3)
     assert not equal(torch.tensor([1.0, 2.5]), torch.tensor([1.0, 2.0]), Tolerance(atol=1e-3))
     assert not equal(torch.tensor([2]), torch.tensor([1]), Tolerance(atol=5))
+
+
+def test_a_tensor_over_the_inline_limit_is_written_as_a_digest_that_equals_it():
+    big = torch.arange(20_000, dtype=torch.bfloat16)
+    source = to_source(serialize(big), names=names("bfloat16") | DIGEST)
+    assert "dtype=torch.bfloat16," in source
+    assert "mean=" in source
+    recorded = eval(source, SCOPE | {"expect": expect})
+    expect(big, recorded)
+    assert not equal(big + 1, recorded)
+    assert not equal(big.float(), recorded)

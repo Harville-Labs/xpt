@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from xpt.diff import Change, Diff
+from xpt.diff import ArrayCount, Change, Diff
 from xpt.path import format_path
 from xpt.source import one_line
 from xpt.tolerance import EXACT, Tolerance
@@ -33,11 +33,18 @@ def changes(
     shown = result.changes if limit is None else result.changes[:limit]
     hidden = len(result.changes) - len(shown)
     change = _sides if labeled else _change
-    lines = [change(c, width) for c in shown]
+    lines = [*map(_count, result.arrays), *(change(c, width) for c in shown)]
     if hidden:
         lines.append(f"  ... {hidden} more changes")
     lines.append(f"  {len(result.changes)} changed, {result.unchanged} unchanged")
     return lines
+
+
+def _count(a: ArrayCount) -> str:
+    line = f"  {format_path(a.path)}: {a.differ} of {a.total} elements differ"
+    if a.largest is None or a.at is None:
+        return line
+    return f"{line}, the largest by {a.largest:g} at {format_path(a.at)}"
 
 
 def _change(c: Change, width: int | None) -> str:

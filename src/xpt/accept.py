@@ -106,6 +106,9 @@ def _replace(file: Path, data: bytes) -> None:
         os.replace(temp, file)
     finally:
         temp.unlink(missing_ok=True)
+    # A same-size edit in the same second passes CPython's and pytest's mtime-and-size pyc check.
+    for cached in (file.parent / "__pycache__").glob(f"{file.stem}.*.pyc"):
+        cached.unlink(missing_ok=True)
 
 
 @contextmanager

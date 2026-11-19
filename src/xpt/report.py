@@ -10,7 +10,7 @@ MAX_CHARS = 80
 
 
 def missing(actual: Value) -> str:
-    return f"expect() has no expected value. Actual: {_show(actual)}"
+    return f"expect() has no expected value. Actual: {show(actual)}"
 
 
 def mismatch(result: Diff) -> str:
@@ -26,17 +26,17 @@ def mismatch(result: Diff) -> str:
 def _change(c: Change) -> str:
     expected, actual = c.expected, c.actual
     if expected is not None and actual is not None:
-        text = f"{_show(expected)} -> {_show(actual)}"
+        text = f"{show(expected)} -> {show(actual)}"
     elif expected is not None:
-        text = f"removed {_show(expected)}"
+        text = f"removed {show(expected)}"
     elif actual is not None:
-        text = f"added {_show(actual)}"
+        text = f"added {show(actual)}"
     else:
         raise AssertionError(f"a change needs at least one side: {c!r}")
     return f"  {format_path(c.path)}: {text}"
 
 
-def _show(value: Value) -> str:
+def show(value: Value) -> str:
     text = one_line(value)
     if len(text) <= MAX_CHARS:
         return text

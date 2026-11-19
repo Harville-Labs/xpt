@@ -174,18 +174,28 @@ pytest run
             -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
   session end: compact summary, nonzero exit if anything failed or was missing
 
-xpt failures [--json]       read the latest run, group by id, print one line per id
-xpt show <id> [--json]      the changes for one id, paths only, with limits
-xpt show <id> --full        both whole values
+xpt failures                every group of the latest run, each with its diff
+xpt show <id>               one group with its function and tests, paths only, with limits
+xpt show <id> --full        no limits, plus both whole values
 xpt accept <id>... [--dry-run]
 xpt accept --missing        fill every missing expectation, nothing else
-xpt reject <id>...
-xpt clean
+xpt accept --all            every acceptable group; the rest are reported with their reason
+xpt runs                    the recorded runs, newest first
+xpt clean                   delete .xpt/
+xpt reject <id>...          planned in #30
 ```
+
+Every command takes `--json`, and `--root PATH` for a project other than the current directory. `failures`, `show`, and `accept` take `--run ID` to read an older run instead of the latest. `python -m xpt` runs the same command.
+
+Exit codes:
+
+- `0`: the command did what it was asked, or there is nothing to do.
+- `1`: `failures` found failures, or `accept` left a requested group stale or skipped.
+- `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
 
 Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. Accept is idempotent. Running it twice leaves the file as it was after the first run, because the second run finds the fingerprint already matches the accepted value and has nothing to do.
 
-`accept` without arguments does nothing and says so. Replacing existing expectations needs ids, or `--all-mismatches` written out in full. `--missing` fills only empty expectations, because creating one does not overwrite a reviewed value.
+`accept` without arguments does nothing and says so. Replacing existing expectations needs ids or `--all`. `--missing` fills only empty expectations, because creating one does not overwrite a reviewed value. The design first named the bulk flag `--all-mismatches` so that typing it would be deliberate. `--all` is just as explicit, also fills missing values, and is the flag agents reach for. `xpt failures` prints every diff before the footer suggests an accept, so the change is on screen when it is accepted.
 
 ## Persistence
 
@@ -256,9 +266,20 @@ FAILED tests/test_parser.py::test_parser
     1 changed, 42 unchanged
 ```
 
-Limits: at most 10 changes per expectation, and values longer than 80 characters are cut with a length marker. `xpt show` lifts both limits. The session footer prints one line: `3 expectations failed (2 mismatch, 1 missing). xpt failures for details.`
+Limits: at most 10 changes per expectation, and values longer than 80 characters are cut with a length marker. `xpt show --full` lifts both limits. The session footer prints one line: `3 expectations failed (2 mismatch, 1 missing). xpt failures for details.`
 
-JSON is the same data with `"schema_version": 1`. Every CLI command takes `--json`. The CLI handlers are thin wrappers over a Python API (`xpt.api.failures()`, `show()`, `accept()`), so an MCP server later is a fourth thin wrapper and not a redesign.
+`xpt failures` prints the same block per group, a one-line footer with the counts, and the next command:
+
+```
+a81f  tests/test_parser.py:14  mismatch  2 tests
+  value.operator: "addition" -> "subtraction"
+  1 changed, 42 unchanged
+1 failure in run 20260101T120000-ab12 (1 mismatch), 1 acceptable. Next: xpt accept a81f
+```
+
+There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`.
+
+The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `diff`, and their data types, so an MCP server later is another thin wrapper and not a redesign.
 
 ## Concurrency
 

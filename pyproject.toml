@@ -18,6 +18,9 @@ classifiers = [
 [project.urls]
 Repository = "https://github.com/Harville-Labs/xpt"
 
+[project.scripts]
+xpt = "xpt.cli:main"
+
 [project.entry-points.pytest11]
 xpt = "xpt.pytest_plugin"
 

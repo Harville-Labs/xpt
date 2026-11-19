@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 
 from xpt.accept import AcceptResult
+from xpt.decisions import FILE, RejectOutcome
 from xpt.diff import Change, Diff, diff
 from xpt.group import Group
 from xpt.path import format_path
@@ -29,7 +30,8 @@ def group_lines(g: Group, *, verbose: bool = False, full: bool = False) -> Lines
     """A heading line and the group's body; `verbose` adds the function and tests, `full`
     lifts the limits and prints both whole values."""
     limit, width = (None, None) if full else (MAX_CHANGES, MAX_CHARS)
-    lines = [f"{heading(g.id, g.site, g.status)}  {_count(len(g.tests), 'test')}"]
+    rejected = "  rejected" if g.rejected else ""
+    lines = [f"{heading(g.id, g.site, g.status)}{rejected}  {_count(len(g.tests), 'test')}"]
     if verbose:
         if isinstance(g.site, CallSite):
             lines.append(f"  function: {g.site.qualname}")
@@ -49,10 +51,11 @@ def failures_lines(run: str, groups: Sequence[Group], run_option: str) -> Lines:
     if not groups:
         return [f"No failures in run {run}."]
     lines = [line for g in groups for line in group_lines(g)]
-    ids = [g.id for g in groups if g.acceptable and g.id is not None]
+    ids = [g.id for g in groups if g.offered and g.id is not None]
+    rejected = sum(g.rejected for g in groups)
     summary = (
         f"{_count(len(groups), 'failure')} in run {run} ({_statuses(g.status for g in groups)}), "
-        f"{len(ids)} acceptable."
+        f"{len(ids)} acceptable" + (f", {rejected} rejected." if rejected else ".")
     )
     if ids:
         return [*lines, f"{summary} Next: xpt accept{run_option} {' '.join(ids)}"]
@@ -61,17 +64,19 @@ def failures_lines(run: str, groups: Sequence[Group], run_option: str) -> Lines:
 
 def show_lines(g: Group, full: bool, run_option: str) -> Lines:
     lines = group_lines(g, verbose=True, full=full)
+    if g.rejected:
+        return [
+            *lines,
+            f"{g.id} was rejected as a bug. Fix the code under test and run the tests again, "
+            f"or run xpt accept{run_option} {g.id} to accept it anyway.",
+        ]
     if g.acceptable:
         return [*lines, f"Next: xpt accept{run_option} {g.id}"]
     return [*lines, f"{g.id} cannot be accepted. Fix the test and run it again."]
 
 
 def accept_lines(result: AcceptResult, dry_run: bool, retry: str) -> Lines:
-    lines = []
-    for o in result.outcomes:
-        lines.append(heading(o.group.id, o.group.site, o.status))
-        if o.reason:
-            lines.append(f"  {o.reason}")
+    lines = _outcome_lines(result.outcomes)
     counts = f"({_statuses(o.status for o in result.outcomes)})"
     files = ", ".join(result.changed)
     if dry_run:
@@ -81,6 +86,27 @@ def accept_lines(result: AcceptResult, dry_run: bool, retry: str) -> Lines:
     if any(o.status == "stale" for o in result.outcomes):
         return [*lines, f"{done} {counts}. Next: run the tests, then xpt failures."]
     return [*lines, f"{done} {counts}. Next: run the tests."]
+
+
+def reject_lines(outcomes: Sequence[RejectOutcome]) -> Lines:
+    lines = _outcome_lines(outcomes)
+    added = sum(o.status == "rejected" for o in outcomes)
+    done = (
+        f"Recorded {_count(added, 'rejection')} in .xpt/{FILE}"
+        if added
+        else "Nothing new to record"
+    )
+    counts = _statuses(o.status for o in outcomes)
+    return [*lines, f"{done} ({counts}). Next: fix the code under test, then run the tests."]
+
+
+def _outcome_lines(outcomes: Sequence[Outcome | RejectOutcome]) -> Lines:
+    lines = []
+    for o in outcomes:
+        lines.append(heading(o.group.id, o.group.site, o.status))
+        if o.reason:
+            lines.append(f"  {o.reason}")
+    return lines
 
 
 def runs_lines(runs: Sequence[tuple[str, bool, int]]) -> Lines:
@@ -111,6 +137,7 @@ def group_json(g: Group) -> dict[str, Json]:
         "site": site_json(g.site),
         "status": g.status,
         "acceptable": g.acceptable,
+        "rejected": g.rejected,
         "tests": list(g.tests),
         "detail": g.detail,
         "actuals": [to_json(v) for v in g.actuals],
@@ -133,7 +160,11 @@ def change_json(c: Change) -> dict[str, Json]:
     return data
 
 
-def outcome_json(o: Outcome) -> dict[str, Json]:
+def accept_json(result: AcceptResult) -> dict[str, Json]:
+    return {"outcomes": [outcome_json(o) for o in result.outcomes], "changed": list(result.changed)}
+
+
+def outcome_json(o: Outcome | RejectOutcome) -> dict[str, Json]:
     return {
         "id": o.group.id,
         "site": site_json(o.group.site),

@@ -232,8 +232,8 @@ def test_a_held_lock_refuses_and_names_the_lock_file(tmp_path: Path):
     with pytest.raises(AcceptError) as info:
         accept(tmp_path, [])
     assert str(info.value) == (
-        f"{lock.as_posix()} exists, so another xpt accept is running. "
-        f"If none is, delete {lock.as_posix()} and run accept again."
+        f"{lock.as_posix()} exists, so another xpt command is writing to .xpt/. "
+        f"If none is, delete {lock.as_posix()} and run the command again."
     )
     assert lock.read_text(encoding="utf-8") == "123"
 

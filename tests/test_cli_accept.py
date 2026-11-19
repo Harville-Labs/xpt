@@ -145,8 +145,8 @@ def test_a_held_lock_is_a_usage_error_and_nothing_is_written(
     ran = xpt(capsys, "accept", ids["test_missing"])
     assert (ran.code, ran.out) == (2, "")
     assert ran.err == (
-        "xpt: error: .xpt/accept.lock exists, so another xpt accept is running. "
-        "If none is, delete .xpt/accept.lock and run accept again.\n"
+        "xpt: error: .xpt/accept.lock exists, so another xpt command is writing to .xpt/. "
+        "If none is, delete .xpt/accept.lock and run the command again.\n"
     )
     assert source(pytester) == SOURCE
 

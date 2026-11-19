@@ -9,6 +9,11 @@ from xpt.group import Group, group
 from xpt.record import load_run
 
 
+@pytest.fixture(autouse=True)
+def utf_8_child_output(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
+
+
 def failing_run(pytester: pytest.Pytester, source: str, failed: int) -> tuple[Group, ...]:
     source_file(pytester).write_text(textwrap.dedent(source), encoding="utf-8")
     pytester.makeini("[pytest]\n")

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from xpt.literal import float_literal, quote
 from xpt.path import Attr, Index, Key, Path
 from xpt.serialize import UnsupportedValue
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Seq, Set, Str, Value
@@ -27,7 +28,7 @@ def to_source(
     """
     if isinstance(value, Str) and _triple_quotable(value.v):
         return f'"""{value.v}"""'
-    printer = _Printer(width, names or {})
+    printer = _Printer(width, (names or {}).get)
     return printer.render(value, (), indent, indent if column is None else column, "", "")
 
 
@@ -47,10 +48,15 @@ class _Group:
     single_comma: bool = False
 
 
+def one_line(value: Value) -> str:
+    """Print a value on one line for reports, naming each dataclass by its qualname."""
+    return _Printer(0, lambda type_id: type_id.rpartition(":")[2]).flat(value, ())
+
+
 class _Printer:
-    def __init__(self, width: int, names: Mapping[str, str]) -> None:
+    def __init__(self, width: int, name: Callable[[str], str | None]) -> None:
         self.width = width
-        self.names = names
+        self.name = name
 
     def render(
         self, value: Value, path: Path, indent: int, column: int, prefix: str, suffix: str
@@ -112,7 +118,7 @@ class _Printer:
                 )
                 return _Group("{", labelled, "}")
             case Dataclass(type_id, fields):
-                name = self.names.get(type_id)
+                name = self.name(type_id)
                 if name is None:
                     raise UnsupportedValue(path, f"is a {type_id} that is not importable by name")
                 labelled = tuple(_Child(f"{f}=", v, (*path, Attr(f))) for f, v in fields)
@@ -130,10 +136,8 @@ def _atom(value: Value) -> str:
             return quote(v)
         case Int(v) | Bool(v):
             return repr(v)
-        case Float(text) if text in ("nan", "inf", "-inf"):
-            return f'float("{text}")'
         case Float(text):
-            return text.replace("e+", "e")
+            return float_literal(text)
         case Null():
             return "None"
         case Set("set", ()):
@@ -141,19 +145,6 @@ def _atom(value: Value) -> str:
         case Set("frozenset", ()):
             return "frozenset()"
     raise AssertionError(f"not an atom: {value!r}")
-
-
-def quote(s: str) -> str:
-    q = "'" if s.count('"') > s.count("'") else '"'
-    return q + "".join(_escape(c, q) for c in s) + q
-
-
-def _escape(c: str, q: str) -> str:
-    if c == "\\" or c == q:
-        return "\\" + c
-    if c.isprintable() or c == " ":
-        return c
-    return repr(c)[1:-1]
 
 
 def _triple_quotable(s: str) -> bool:

@@ -1,6 +1,6 @@
 [project]
 name = "xpt"
-version = "0.0.0"
+version = "0.1.0"
 description = "Inline expect tests for Python, built for coding agents and the people reviewing their work."
 readme = "README.md"
 license = "MIT"

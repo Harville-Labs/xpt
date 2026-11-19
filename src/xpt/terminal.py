@@ -2,64 +2,127 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
 import pytest
-from _pytest import timing
 
 from xpt import decisions, record
 from xpt.accept import AcceptResult
 from xpt.failure import Failure, Text, Where, streams, where_from_json
 from xpt.summary import Session, limits, report_json, report_lines
 
+try:
+    from pytest import TerminalReporter
+except ImportError:  # pytest exports it from 8.4; older releases only have the private path.
+    from _pytest.terminal import TerminalReporter
+
 CREATED = pytest.StashKey[AcceptResult]()
 
-_SUMMARY_EXIT_CODES = (
-    pytest.ExitCode.OK,
-    pytest.ExitCode.TESTS_FAILED,
-    pytest.ExitCode.INTERRUPTED,
-    pytest.ExitCode.USAGE_ERROR,
-    pytest.ExitCode.NO_TESTS_COLLECTED,
+ISSUES = "https://github.com/Harville-Labs/xpt/issues"
+_NOT_A_TEST_RUN = (
+    "collectonly",
+    "showfixtures",
+    "show_fixtures_per_test",
+    "markers",
+    "setuponly",
+    "setupplan",
+    "help",
+    "version",
 )
+_DEFAULT_REPORTCHARS = "fE"
+OLDEST_PYTEST = (8, 0)
 
 
-class AgentReporter(pytest.TerminalReporter):  # ty: ignore[subclass-of-final-class]
-    """pytest's terminal reporter with the progress, header, and summary sections replaced
-    by one compact block per failure and a one-line footer.
+def stock_reason(config: pytest.Config) -> str | None:
+    """Why this run keeps pytest's own report, or None when the xpt report replaces it.
 
-    It takes over the registered reporter object instead of replacing it, so plugins that
-    already hold it, such as xdist, keep writing through it. pytest marks the class final,
-    so a pytest upgrade can break this; the golden tests in test_agent_report.py catch it.
+    The xpt report replaces pytest's failure sections, so an option that asks pytest for a
+    particular form of them keeps pytest's report for the run instead of being ignored.
+    """
+    option = config.option
+    for name in _NOT_A_TEST_RUN:
+        if getattr(option, name, False):
+            return f"{name} does not run tests"
+    if getattr(option, "tbstyle", "auto") != "auto":
+        return "--tb chooses pytest's traceback style"
+    if getattr(option, "showlocals", False):
+        return "--showlocals asks for pytest's tracebacks"
+    if getattr(option, "fulltrace", False):
+        return "--full-trace asks for pytest's tracebacks"
+    return None
+
+
+def unsupported_pytest() -> str | None:
+    if tuple(getattr(pytest, "version_tuple", (0, 0))[:2]) >= OLDEST_PYTEST:
+        return None
+    return (
+        f"xpt: the xpt report needs pytest {OLDEST_PYTEST[0]}.{OLDEST_PYTEST[1]} or later and "
+        f"this is pytest {pytest.__version__}, so this is pytest's report. "
+        "--xpt-report=pytest hides this line."
+    )
+
+
+def notice(error: BaseException) -> str:
+    return (
+        f"xpt: the xpt report failed ({type(error).__name__}: {error}), so this is pytest's "
+        f"report. Please report it at {ISSUES}. --xpt-report=pytest hides this line."
+    )
+
+
+class AgentReporter(TerminalReporter):  # ty: ignore[subclass-of-final-class]
+    """pytest's own terminal reporter with its progress, header, failure sections, short
+    summary, and final line replaced by the xpt report.
+
+    Every other hook and attribute is pytest's, on the same object pytest registered, so
+    plugins that hold the reporter or call it keep working. The overrides are methods pytest
+    names publicly; a run where rendering raises prints pytest's sections instead.
     """
 
-    json_path: str | None
+    xpt_json: str | None
+    xpt_quiet: bool
+    xpt_session: pytest.Session | None
+    xpt_started: float
 
     @classmethod
     def install(cls, config: pytest.Config, json_path: str | None) -> None:
         manager = config.pluginmanager
         reporter = manager.get_plugin("terminalreporter")
-        if not isinstance(reporter, pytest.TerminalReporter):
+        if type(reporter) is not TerminalReporter:
             return
-        manager.unregister(reporter)
-        reporter.__class__ = cls
-        assert isinstance(reporter, AgentReporter)
-        reporter.json_path = json_path
-        manager.register(reporter, "terminalreporter")
+        if (unsupported := unsupported_pytest()) is not None:
+            reporter.write_line(unsupported)
+            return
+        try:
+            swap(reporter, cls, json_path)
+        except Exception as error:
+            reporter.__class__ = TerminalReporter
+            if not manager.is_registered(reporter):
+                manager.register(reporter, "terminalreporter")
+            reporter.write_line(notice(error))
+
+    @property
+    def showheader(self) -> bool:
+        return False
+
+    def pytest_report_header(self, config: pytest.Config) -> list[str]:
+        return []
 
     @pytest.hookimpl(trylast=True)
     def pytest_sessionstart(self, session: pytest.Session) -> None:
-        self._session = session
-        self._session_start = timing.Instant()
-
-    @pytest.hookimpl(tryfirst=True, optionalhook=True)
-    def pytest_xdist_setupnodes(self) -> None:
-        dist = self.config.pluginmanager.get_plugin("terminaldistreporter")
-        if dist is not None:
-            # xdist writes worker status as whole lines only when it believes it is not on a
-            # tty; on a tty it rewrites one line through rewrite(), which prints nothing here.
-            dist._isatty = True
+        self.xpt_session = session
+        self.xpt_started = time.perf_counter()
+        super().pytest_sessionstart(session)
+        if self.verbosity < 0 or self.no_header:
+            return
+        hooked = self.config.hook.pytest_report_header(
+            config=self.config, start_path=self.startpath
+        )
+        for lines in reversed(hooked):
+            for line in [lines] if isinstance(lines, str) else lines:
+                self.write_line(line)
 
     def pytest_collection(self) -> None:
         pass
@@ -68,82 +131,74 @@ class AgentReporter(pytest.TerminalReporter):  # ty: ignore[subclass-of-final-cl
         pass
 
     def pytest_runtest_logstart(self, nodeid: str, location: tuple[str, int | None, str]) -> None:
-        pass
+        if self.verbosity > 0:
+            super().pytest_runtest_logstart(nodeid, location)
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
-        self._tests_ran = True
-        category, _, _ = self.config.hook.pytest_report_teststatus(
-            report=report, config=self.config
-        )
-        self._add_stats(category, [report])
+        self.xpt_quiet = self.verbosity <= 0
+        try:
+            super().pytest_runtest_logreport(report)
+        finally:
+            self.xpt_quiet = False
+
+    def pytest_runtest_logfinish(self, nodeid: str) -> None:
+        stock = getattr(super(), "pytest_runtest_logfinish", None)
+        if stock is not None and self.verbosity > 0:
+            stock(nodeid)
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_runtestloop(self) -> Generator[None, object, object]:
-        return (yield)
-
-    def rewrite(self, line: str, **markup: bool) -> None:
-        pass
-
-    def write_line(self, line: str | bytes, **markup: bool) -> None:
-        if line:
-            super().write_line(line, **markup)
-
-    def write_sep(
-        self, sep: str, title: str | None = None, fullwidth: int | None = None, **markup: bool
-    ) -> None:
-        if title:
-            self.write_line(title, **markup)
-
-    @pytest.hookimpl(wrapper=True)
-    def pytest_terminal_summary(self) -> Generator[None]:
-        return (yield)
-
-    @pytest.hookimpl(wrapper=True)
-    def pytest_sessionfinish(
-        self, session: pytest.Session, exitstatus: int | pytest.ExitCode
-    ) -> Generator[None]:
+    def pytest_report_teststatus(self) -> Generator[None, Any, Any]:
         result = yield
-        if exitstatus in _SUMMARY_EXIT_CODES:
-            self.config.hook.pytest_terminal_summary(
-                terminalreporter=self, exitstatus=exitstatus, config=self.config
-            )
-        self._check_max_warnings(session)
-        if session.shouldfail:
-            self.write_line(str(session.shouldfail))
-        if exitstatus == pytest.ExitCode.INTERRUPTED and self._keyboardinterrupt_memo is not None:
-            self._report_keyboardinterrupt()
-            self._keyboardinterrupt_memo = None
-        elif session.shouldstop:
-            self.write_line(str(session.shouldstop))
-        finished = self._finished(session)
-        for line in report_lines(finished, limits(self.config.get_verbosity())):
-            self.write_line(line)
-        if self.json_path is not None:
-            text = json.dumps(report_json(finished), ensure_ascii=False, indent=2)
-            Path(self.json_path).write_text(text + "\n", encoding="utf-8")
+        if self.xpt_quiet and result:
+            return (result[0], "", "")
         return result
 
-    def _check_max_warnings(self, session: pytest.Session) -> None:
-        maximum = getattr(self, "_get_max_warnings", lambda: None)()
-        if maximum is None or session.exitstatus != pytest.ExitCode.OK:
-            return
-        count = len(self.stats.get("warnings", []))
-        if count > maximum:
-            session.exitstatus = pytest.ExitCode.MAX_WARNINGS_ERROR
-            self.write_line(
-                f"Tests pass, but maximum allowed warnings exceeded: {count} > {maximum}"
-            )
+    def summary_errors(self) -> None:
+        pass
 
-    def _finished(self, session: pytest.Session) -> Session:
+    def summary_failures(self) -> None:
+        pass
+
+    def short_test_summary(self) -> None:
+        if self.reportchars_requested():
+            super().short_test_summary()
+
+    def reportchars_requested(self) -> bool:
+        return self.config.option.reportchars not in (_DEFAULT_REPORTCHARS, "")
+
+    def summary_stats(self) -> None:
+        try:
+            finished = self._finished()
+            lines = report_lines(finished, limits(self.config.get_verbosity()))
+        except Exception as error:
+            self._fall_back(error)
+            return
+        for line in lines[-1:] if self.no_summary else lines:
+            self.write_line(line)
+        if self.xpt_json is not None:
+            text = json.dumps(report_json(finished), ensure_ascii=False, indent=2)
+            Path(self.xpt_json).write_text(text + "\n", encoding="utf-8")
+
+    def _fall_back(self, error: Exception) -> None:
+        if not self.no_summary:
+            super().summary_errors()
+            super().summary_failures()
+            if not self.reportchars_requested():
+                super().short_test_summary()
+        super().summary_stats()
+        self.write_line(notice(error))
+
+    def _finished(self) -> Session:
         reports = [r for key in ("failed", "error") for r in self.stats.get(key, []) if r.failed]
         reports.sort(key=_order)
         parts, _ = self.build_summary_stats_line()
         run = record.recorder.run if record.recorder.enabled else None
+        session = self.xpt_session
         return Session(
             failures=tuple(_failure(r) for r in reports),
             counts=tuple(text for text, _ in parts),
-            seconds=self._session_start.elapsed().seconds,
-            exit_code=int(session.exitstatus),
+            seconds=time.perf_counter() - self.xpt_started,
+            exit_code=int(session.exitstatus) if session is not None else 0,
             run=run,
             rejected=self._rejected() if run else frozenset(),
             created=self.config.stash.get(CREATED, None),
@@ -155,6 +210,19 @@ class AgentReporter(pytest.TerminalReporter):  # ty: ignore[subclass-of-final-cl
         except record.RecordError as error:
             self.write_line(f"xpt: {error}")
             return frozenset()
+
+
+def swap(reporter: Any, cls: type[AgentReporter], json_path: str | None) -> None:
+    """Turn pytest's registered reporter into `cls` in place and register it again, so the
+    new hook methods take effect and plugins already holding the object keep it."""
+    manager = reporter.config.pluginmanager
+    manager.unregister(reporter)
+    reporter.__class__ = cls
+    reporter.xpt_json = json_path
+    reporter.xpt_quiet = False
+    reporter.xpt_session = None
+    reporter.xpt_started = time.perf_counter()
+    manager.register(reporter, "terminalreporter")
 
 
 def _failure(rep: Any) -> Failure:

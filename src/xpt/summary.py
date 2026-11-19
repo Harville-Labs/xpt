@@ -109,9 +109,9 @@ def _sites(created: AcceptResult, *statuses: str) -> list[CallSite]:
     ]
 
 
-def _entries(failures: Sequence[Failure]) -> list[tuple[Failure, list[str]]]:
+def _entries(failures: Sequence[Failure]) -> list[tuple[Failure, list[Failure]]]:
     """Fold parametrized cases that fail the same way into the first case."""
-    entries: dict[tuple[object, ...], tuple[Failure, list[str]]] = {}
+    entries: dict[tuple[object, ...], tuple[Failure, list[Failure]]] = {}
     for f in failures:
         match = _CASE.match(f.test)
         if match is None:
@@ -119,7 +119,7 @@ def _entries(failures: Sequence[Failure]) -> list[tuple[Failure, list[str]]]:
             continue
         key = (match["base"], f.when, f.where.path, f.where.line, _kind(f))
         if key in entries:
-            entries[key][1].append(match["case"])
+            entries[key][1].append(f)
         else:
             entries[key] = (f, [])
     return list(entries.values())
@@ -130,22 +130,45 @@ def _kind(f: Failure) -> str:
     return detail.type if isinstance(detail, Raised) else type(detail).__name__
 
 
-def _block(f: Failure, cases: Sequence[str], groups: dict[SiteKey, Group], lim: Limits) -> Lines:
+def _block(
+    f: Failure, cases: Sequence[Failure], groups: dict[SiteKey, Group], lim: Limits
+) -> Lines:
     label = "FAILED" if f.when == "call" else "ERROR"
     phase = "" if f.when == "call" else f" ({f.when})"
     at = _at(f.where)
     lines = [f"{label} {f.test}{phase}" + ("" if at == f.test else f"  {at}")]
-    if cases:
-        lines.append(f"  also fails: {' '.join(cases)}")
     if f.where.source:
         lines.append(f"  > {cut(f.where.source, lim.width)}")
-    lines += _detail(f, groups, lim)
+    detail = _detail(f, groups, lim)
+    lines += detail
     if f.where.cause:
         lines.append(f"  caused by: {cut(f.where.cause, lim.message)}")
     for stream, text in f.output:
         lines += [f"  {stream}: {cut(line, lim.width)}" for line in _tail(text, lim.output)]
+    lines += _cases(detail, cases, groups, lim)
     if lim.traceback and f.traceback:
         lines += ["  traceback:", *(f"    {line}" for line in f.traceback.splitlines())]
+    return lines
+
+
+def _cases(
+    first: Lines, cases: Sequence[Failure], groups: dict[SiteKey, Group], lim: Limits
+) -> Lines:
+    """Each folded case by node id, with its first detail line that differs from the first's.
+
+    Folded cases share the exception type, so the brief drops it.
+    """
+    limit = len(cases) if lim.changes is None else lim.changes
+    lines = []
+    for case in cases[:limit]:
+        pairs = zip(_detail(case, groups, lim), first, strict=False)
+        brief = next((mine.strip() for mine, theirs in pairs if mine != theirs), None)
+        if brief and isinstance(detail := case.where.detail, Raised):
+            brief = brief.removeprefix(f"{detail.type}: ")
+        lines.append(f"  also fails: {case.test}" + (f"  {brief}" if brief else ""))
+    hidden = len(cases) - limit
+    if hidden > 0:
+        lines.append(f"  ... {hidden} more case{'' if hidden == 1 else 's'}")
     return lines
 
 
@@ -248,6 +271,6 @@ def _failure_json(f: Failure, groups: dict[SiteKey, Group]) -> dict[str, Json]:
             data["group"] = group_json(g)
     if isinstance(detail, Compared):
         found = diff(detail.left, detail.right)
-        data["changes"] = [change_json(c) for c in found.changes]
+        data["changes"] = [change_json(c, labeled=True) for c in found.changes]
         data["unchanged"] = found.unchanged
     return data

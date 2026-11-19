@@ -26,3 +26,41 @@ jobs:
       - run: uv run ruff check
       - run: uv run ty check
       - run: uv run pytest
+
+  pytest-versions:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pytest: "8.0.2", xdist: "3.5.0" }
+          - { pytest: "8.0.2", xdist: "3.8.0" }
+          - { pytest: "8.1.2", xdist: "3.6.1" }
+          - { pytest: "8.2.2", xdist: "3.8.0" }
+          - { pytest: "8.3.5", xdist: "3.8.0" }
+          - { pytest: "8.4.2", xdist: "3.8.0" }
+          - { pytest: "9.0.3", xdist: "3.8.0" }
+          - { pytest: "9.1.1", xdist: "3.8.0" }
+          - { pytest: "9.2.0", xdist: "3.5.0" }
+    name: pytest ${{ matrix.pytest }}, xdist ${{ matrix.xdist }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: >-
+          uv run --isolated --no-dev
+          --with pytest==${{ matrix.pytest }} --with pytest-xdist==${{ matrix.xdist }}
+          --with hypothesis --with ruff
+          python -m pytest -p no:sugar
+
+  pytest-sugar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: >-
+          uv run --isolated --no-dev --with pytest --with pytest-xdist --with pytest-sugar
+          --with hypothesis python -m pytest -p no:sugar tests/test_report_compat.py

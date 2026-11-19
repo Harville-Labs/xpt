@@ -281,3 +281,24 @@ def test_a_rewritten_file_keeps_its_permissions(pytester: pytest.Pytester):
     if os.name == "posix":
         assert path.stat().st_mode & 0o777 == 0o640
     assert [p.name for p in pytester.path.iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_a_rerun_in_the_same_second_runs_the_accepted_source(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    groups = failing_run(
+        pytester,
+        """\
+        from xpt import expect
+
+        def test_it():
+            expect(1 + 1, 3)
+        """,
+        failed=1,
+    )
+    before = source_file(pytester).stat()
+    accept(pytester.path, groups)
+    assert source_file(pytester).stat().st_size == before.st_size
+    os.utime(source_file(pytester), ns=(before.st_atime_ns, before.st_mtime_ns))
+    pytester.runpytest_subprocess("-p", "no:cacheprovider").assert_outcomes(passed=1)

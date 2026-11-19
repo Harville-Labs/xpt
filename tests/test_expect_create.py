@@ -122,8 +122,9 @@ def test_the_json_report_has_no_outcomes_without_the_flag(project: pytest.Pytest
     assert report["created"] is None
 
 
-def test_pytest_output_also_says_what_was_filled(project: pytest.Pytester):
-    result = run(project, "--expect-create", "--xpt-report=pytest")
+@pytest.mark.parametrize("report", [["--xpt-report=pytest"], ["--tb=short"]])
+def test_pytest_output_also_says_what_was_filled(project: pytest.Pytester, report: list[str]):
+    result = run(project, "--expect-create", *report)
     assert source(project) == FILLED
     result.stdout.fnmatch_lines(
         ["Filled 2 missing expectations: test_sample.py:4 test_sample.py:7."]

@@ -306,23 +306,26 @@ FAILED tests/test_io.py::test_load  tests/test_io.py:8 > src/app/io.py:12 read_c
   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
   caused by: FileNotFoundError: [Errno 2] No such file or directory: 'app.toml'
 FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
-  also fails: [1] [3] [4]
   > assert double(x) == x + 2
   AssertionError: assert (0 * 2) == (0 + 2)
   stdout: debug line 0
-7 failed, 2 passed in 0.31s. Next: xpt accept a81f
+  also fails: tests/test_math.py::test_double[1]  assert (1 * 2) == (1 + 2)
+  also fails: tests/test_math.py::test_double[3]  assert (3 * 2) == (3 + 2)
+6 failed, 2 passed in 0.31s. Next: xpt accept a81f
 ```
 
 - Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. When the error is raised in a helper, the header shows the chain of project frames from the test down instead, as `path:line > path:line function`, keeping the first frame and the three nearest the error. The test's own name is left out because the node id has it. The next line is the source line at the deepest frame, after `> `. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
 - An `expect()` failure shows its short id, its status, and the path diff.
 - A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars, unsupported values, and other operators keep pytest's explanation.
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
-- Parametrized cases that fail at the same line with the same kind of error fold into the first case, and `also fails:` lists the rest.
+- Parametrized cases that fail at the same line with the same kind of error fold into the first case. Each other case gets an `also fails:` line with its full node id, which can be pasted into a pytest command, and the first detail line where it differs from the first case, without the shared exception type. The default limit of 10 applies, and the rest are counted.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
 - The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`, and `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same `Filled` line prints after pytest's summary.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
-- Internal errors, `-x` stops, and other plugins' summary lines still print. Exit codes are pytest's. Under xdist the controller prints one report, and worker status lines are dropped.
-- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`.
+- `-v` and `-vv` also keep pytest's line per test. `-r` with anything but the default `fE` keeps pytest's short summary beside the report, and `-rP`/`-rA` keep its PASSES section. `--no-summary` prints only the footer. `--no-header` and `-q` drop the plugin header lines.
+- Everything else pytest prints still prints: the warnings summary, plugin header lines and terminal summaries, `--durations`, `-x` stops, keyboard interrupts, interrupted collection, `--lf` messages, `--setup-show`, live logs, the debugger, and xdist's worker status lines. Exit codes are pytest's. Under xdist the controller prints one report.
+- `--tb` other than `auto`, `-l`, and `--full-trace` ask for pytest's failure sections, so those runs keep pytest's report. So do runs that don't run tests: `--co`, `--fixtures`, `--fixtures-per-test`, `--markers`, `--setup-only`, `--setup-plan`, `--help`, and `--version`. `--xpt-json` with one of these is a usage error, because there is no xpt report to write.
+- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`. A compared assert's changes name their sides `left` and `right`, as the text does. `op` reads from left to right, so `add` is a value only the right side has.
 
 The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
 
@@ -338,6 +341,22 @@ a81f  tests/test_parser.py:14  mismatch  2 tests
 There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`. Reject adds `outcomes`. Each group carries `rejected`.
 
 The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `reject`, `load_rejections`, `mark`, `diff`, and their data types, so an MCP server later is another thin wrapper and not a redesign.
+
+### How the report fits into pytest
+
+The report has to work on every pytest a project might pin, and it can't take away anything pytest prints. Three designs were compared on pytest 8.0 through 9.2:
+
+- **A separate reporter of our own**, registered as `terminalreporter` in place of pytest's. pytest's reporter implements about 16 hooks, and the set changes between releases: 8.0 has `pytest_runtest_logfinish`, 9.2 drops it and adds a `pytest_runtestloop` wrapper. Exit messages, `--max-warnings`, `--lf` messages, keyboard interrupts, and the warnings summary all live in those hooks. Plugins also read the reporter's attributes: `_tw` (the debugger), `stats`, `write_sep`, `section`, `write_line`, `rewrite`, `ensure_newline`, `hasmarkup` and `isatty` (xdist), `showfspath`, `startpath`, and `reported_progress`, and `config.get_terminal_writer()` returns `_tw`. A reporter of our own would have to reimplement all of that and follow every release.
+- **A wrapper that delegates to pytest's reporter.** It inherits nothing, so it needs the same list, kept by hand.
+- **pytest's reporter, subclassed in place** (chosen). At configure time xpt changes the registered reporter's class to `AgentReporter`, a subclass, and registers the same object again so pluggy sees the new hooks. Objects that already hold the reporter, such as xdist's `DSession.terminal`, keep it. The subclass overrides only methods pytest names publicly: `summary_failures`, `summary_errors`, `short_test_summary`, `summary_stats`, `report_collect`, `pytest_collection`, the per-test log hooks, `showheader`, and a `pytest_report_teststatus` wrapper that blanks the progress letter while keeping the category, so `stats` stay pytest's. Every other hook and attribute is pytest's own code for that release, so there is no list of pytest's surface to maintain.
+
+The subclass depends only on those method names, which are the same across the tested range. `pytest.TerminalReporter` is public from 8.4, and older releases import it from `_pytest.terminal`. 8.0 is the floor because the report uses `Config.get_verbosity`. On an older pytest the plugin prints pytest's report and a one-line notice.
+
+If the swap raises, xpt puts pytest's class back, registers it again if needed, and prints a notice. If rendering raises, `summary_stats` prints pytest's failure sections, short summary, and final line, then the notice. Neither path changes the exit code. pytest-sugar replaces the reporter with its own class before xpt's `trylast` configure runs, so xpt sees a reporter that isn't pytest's and stands aside.
+
+`tests/test_report_compat.py` holds this to account. It runs a suite with every outcome, a plugin that writes through the reporter, and 32 option sets, once with `--xpt-report=pytest` and once with the xpt report, and asserts equal exit codes, equal stderr, and that every stock line outside the replaced sections also appears in the xpt run. CI runs the whole test suite on each pytest minor release from 8.0 and on the oldest and newest supported pytest-xdist, and the compatibility tests with pytest-sugar installed.
+
+Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, because the report doesn't advance `reported_progress`. Behavior on a real terminal, where pytest rewrites lines, is tested only through the same code paths a pipe uses.
 
 ## Concurrency
 

@@ -15,7 +15,7 @@ from xpt.failure import Compared, Detail, Expected, Frame, Raised, Text, Where, 
 from xpt.group import Group, group, missing
 from xpt.serialize import UnsupportedValue, serialize
 from xpt.summary import filled_line, limits
-from xpt.terminal import CREATED, AgentReporter, location
+from xpt.terminal import CREATED, AgentReporter, location, stock_reason
 from xpt.value import Value
 
 MODES = ("xpt", "pytest")
@@ -64,8 +64,13 @@ def pytest_configure(config: pytest.Config) -> None:
     mode = _mode(config)
     config.stash[_MODE] = mode
     config.stash[_COMPARED] = None
-    if mode == "xpt" and workerinput is None:
+    if mode != "xpt" or workerinput is not None:
+        return
+    reason = stock_reason(config)
+    if reason is None:
         AgentReporter.install(config, config.getoption("xpt_json"))
+    elif config.getoption("xpt_json"):
+        raise pytest.UsageError(f"--xpt-json needs the xpt report, but {reason}.")
 
 
 def _missing(root: Path, run: str) -> list[Group]:
@@ -222,5 +227,5 @@ def pytest_terminal_summary(
 ) -> None:
     created = config.stash.get(CREATED, None)
     line = None if created is None else filled_line(created)
-    if line and config.stash.get(_MODE, None) == "pytest":
+    if line and not isinstance(terminalreporter, AgentReporter):
         terminalreporter.write_line(line)

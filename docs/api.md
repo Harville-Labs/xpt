@@ -1,6 +1,6 @@
 # Python API
 
-`xpt` exports one name, `expect`. Tools that want the CLI's behavior without parsing its output import `xpt.api`. The CLI is a thin wrapper over these functions.
+`xpt` exports `expect` and `register` (see [Your own classes](expect.md#your-own-classes)). Tools that want the CLI's behavior without parsing its output import `xpt.api`. The CLI is a thin wrapper over these functions.
 
 ```python
 from pathlib import Path

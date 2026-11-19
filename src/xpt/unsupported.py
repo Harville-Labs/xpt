@@ -9,7 +9,7 @@ class UnsupportedValue(TypeError):
         self.reason = reason
         super().__init__(
             f"{format_path(path)} {reason}; xpt cannot record it. "
-            "Register an adapter or expect a field of it instead."
+            "Register its class with xpt.register or expect a field of it instead."
         )
 
 

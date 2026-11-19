@@ -29,10 +29,24 @@ Anything else fails with a message that names where the value is and its type:
 
 ```text
 value["handler"] is a builtins:builtin_function_or_method; xpt cannot record it.
-Register an adapter or expect a field of it instead.
+Register its class with xpt.register or expect a field of it instead.
 ```
 
 For any other type, expect a field or a plain conversion of the value, for example `expect(str(path))` or `expect(dataclasses.asdict(obj))`.
+
+### Your own classes
+
+Register a class to record it as a keyword call to its constructor. Pass a function that returns the keyword arguments that rebuild an instance:
+
+```python
+import xpt
+
+xpt.register(Money, lambda m: {"cents": m.cents, "currency": m.currency})
+
+expect({"price": Money(250)}, {"price": Money(cents=250, currency="USD")})
+```
+
+Register at import time, in the module that defines the class or in `conftest.py`. The class must define `__eq__`, because xpt compares the actual value with the rebuilt expected one. `register` raises `TypeError` otherwise. Each key must be a valid keyword argument. A registration applies to that class only, not its subclasses, and takes precedence over how xpt would otherwise write it, so a dataclass can leave out a cache field.
 
 xpt has no dependency on NumPy, PyTorch, pandas, Pydantic, attrs, or protobuf. It recognizes their types by class name and never imports them, so there is nothing extra to install.
 

@@ -194,6 +194,7 @@ def _encode_site(site: CallSite | Unlocatable) -> dict[str, object]:
         "kind": "call",
         "path": site.path,
         "qualname": site.qualname,
+        "callee": site.callee,
         "ordinal": site.ordinal,
         "arg_sha": site.arg_sha,
         "line": site.line,
@@ -235,6 +236,7 @@ def _decode_site(site: dict[str, object]) -> CallSite | Unlocatable:
         return CallSite(
             _str(site, "path"),
             _str(site, "qualname"),
+            _str(site, "callee"),
             _int(site, "ordinal"),
             _str(site, "arg_sha"),
             _int(site, "line"),

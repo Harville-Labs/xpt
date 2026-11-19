@@ -75,7 +75,8 @@ Everything else follows from these records.
 CallSite        # where an expect() call lives in source
   path: str               # relative to the project root
   qualname: str           # "TestParser.test_add", from co_qualname
-  ordinal: int            # index of this call among expect() calls in that function, in source order
+  callee: str             # the called function's source text: "expect", or a helper's name
+  ordinal: int            # index of this call among calls to the same callee in that function
   arg_sha: str            # sha256 of the expected-argument source text, or "" when absent
   line: int               # for display only, never used to locate the call
 
@@ -125,12 +126,12 @@ A passing assertion writes nothing. Run state lives on disk as records. In memor
 
 ## Identity and stale detection
 
-An expectation's identity is its `CallSite` minus `arg_sha`: `(path, qualname, ordinal)`. The display id is the first 4 hex characters of `sha256(path, qualname, ordinal)`, lengthened like a git short hash when two ids collide. The id stays the same across runs as long as the call stays in the same function at the same position among its sibling `expect()` calls. Line numbers can change freely.
+An expectation's identity is its `CallSite` minus `arg_sha` and `line`: `(path, qualname, callee, ordinal)`. The callee is part of it because a helper called with `_depth=1` and a direct `expect()` can share an ordinal in one function. The display id is the first 4 hex characters of `sha256(path, qualname, callee, ordinal)`, lengthened like a git short hash when two ids collide. The id stays the same across runs as long as the call stays in the same function at the same position among its sibling `expect()` calls. Line numbers can change freely.
 
 `arg_sha` is the fingerprint. At accept time we:
 
 1. Parse the file as it is now.
-2. Find the function by `qualname` and the call by `ordinal`.
+2. Find the function by `qualname` and the call by `callee` and `ordinal`.
 3. Hash the expected argument's current source text and compare it to `arg_sha`.
 4. Refuse if the function, the call, or the hash does not match. The error names the file, the expectation, and the fix: `tests/test_parser.py: expectation a81f changed since run 7c2e. Run pytest again to record a fresh observation.`
 

@@ -13,20 +13,21 @@ from functools import lru_cache
 from pathlib import Path
 from types import FrameType
 
-SiteKey = tuple[str, str, int]
+SiteKey = tuple[str, str, str, int]
 
 
 @dataclass(frozen=True, slots=True)
 class CallSite:
     path: str
     qualname: str
+    callee: str
     ordinal: int
     arg_sha: str
     line: int
 
     @property
     def key(self) -> SiteKey:
-        return (self.path, self.qualname, self.ordinal)
+        return (self.path, self.qualname, self.callee, self.ordinal)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +92,7 @@ def locate(frame: FrameType, root: Path) -> CallSite | Unlocatable:
     callee = ast.unparse(call.func)
     before = itertools.takewhile(lambda c: c is not call, calls)
     ordinal = sum(1 for c in before if ast.unparse(c.func) == callee)
-    return CallSite(path, qualname, ordinal, _arg_sha(source, call), line)
+    return CallSite(path, qualname, callee, ordinal, _arg_sha(source, call), line)
 
 
 def site_id(site: CallSite) -> str:

@@ -47,3 +47,5 @@ The run still fails, because the filled expectations were empty when their tests
 
 Status: early development, not released. Read [docs/design.md](docs/design.md) for the design and roadmap, and [docs/research.md](docs/research.md) for how expecttest, inline-snapshot, syrupy, and ApprovalTests compare. Plans are tracked as GitHub issues.
 
+
+[bench/](bench/README.md) measures whether agents fix failing suites with fewer tokens and no more wrong accepts using xpt's report than with pytest's own output.

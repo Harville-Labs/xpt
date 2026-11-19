@@ -1,0 +1,18 @@
+[project]
+name = "ledger"
+version = "0.3.1"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["pytest>=9", "xpt"]
+
+[tool.uv.sources]
+xpt = { path = "WHEEL" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

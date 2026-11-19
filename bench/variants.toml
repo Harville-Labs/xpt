@@ -1,0 +1,6 @@
+[xpt]
+description = "xpt installed, its compact report on"
+
+[stock]
+description = "xpt installed, pytest's own terminal output"
+env = { XPT_REPORT = "pytest" }

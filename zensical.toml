@@ -1,0 +1,67 @@
+[project]
+site_name = "xpt"
+site_description = "Inline expect tests for Python, built for coding agents and the people reviewing their work."
+site_url = "https://harville-labs.github.io/xpt/"
+repo_url = "https://github.com/Harville-Labs/xpt"
+repo_name = "Harville-Labs/xpt"
+copyright = "MIT License"
+nav = [
+  { "Home" = "index.md" },
+  { "Quickstart" = "quickstart.md" },
+  { "Guide" = [
+    { "expect()" = "expect.md" },
+    { "Reviewing failures" = "review.md" },
+    { "pytest report" = "pytest.md" },
+    { "Coding agents" = "agents.md" },
+  ] },
+  { "Reference" = [
+    { "CLI" = "cli.md" },
+    { "JSON output" = "json.md" },
+    { "Python API" = "api.md" },
+  ] },
+  { "Background" = [
+    { "Design" = "design.md" },
+    { "Prior art" = "research.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+]
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+md_in_html = {}
+tables = {}
+toc.permalink = true
+pymdownx.highlight.anchor_linenums = true
+pymdownx.inlinehilite = {}
+pymdownx.superfences = {}

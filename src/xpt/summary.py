@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from xpt.diff import Diff, diff
+from xpt.failure import Compared, Expected, Failure, Raised, Text, where_json
+from xpt.group import Group, group
+from xpt.render import change_json, group_json
+from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
+from xpt.site import SiteKey, Unlocatable
+from xpt.value import Json
+
+SCHEMA_VERSION = 1
+
+Lines = list[str]
+
+_CASE = re.compile(r"^(?P<base>.*?)(?P<case>\[.*\])$")
+
+
+@dataclass(frozen=True, slots=True)
+class Limits:
+    """How much of each failure to print; None lifts a limit."""
+
+    changes: int | None
+    width: int | None
+    output: int | None
+    message: int | None
+    traceback: bool
+
+
+def limits(verbosity: int) -> Limits:
+    if verbosity >= 2:
+        return Limits(None, None, None, None, traceback=True)
+    if verbosity == 1:
+        return Limits(50, 400, 20, 1000, traceback=False)
+    return Limits(MAX_CHANGES, MAX_CHARS, 5, 200, traceback=False)
+
+
+@dataclass(frozen=True, slots=True)
+class Session:
+    """A finished pytest session, as the report needs it."""
+
+    failures: tuple[Failure, ...]
+    counts: tuple[str, ...]
+    seconds: float
+    exit_code: int
+    run: str | None
+
+
+def expect_groups(failures: Sequence[Failure]) -> dict[SiteKey, Group]:
+    observations = [d.observation for f in failures if isinstance(d := f.where.detail, Expected)]
+    groups = group(observations)
+    return {g.site.key: g for g in groups if not isinstance(g.site, Unlocatable)}
+
+
+def report_lines(session: Session, lim: Limits) -> Lines:
+    groups = expect_groups(session.failures)
+    lines: Lines = []
+    for first, cases in _entries(session.failures):
+        lines += _block(first, cases, groups, lim)
+    return [*lines, footer(session, groups)]
+
+
+def footer(session: Session, groups: dict[SiteKey, Group]) -> str:
+    counts = ", ".join(session.counts) or "no tests ran"
+    line = f"{counts} in {session.seconds:.2f}s."
+    if session.run is None or not any(
+        isinstance(f.where.detail, Expected) for f in session.failures
+    ):
+        return line
+    ids = sorted(g.id for g in groups.values() if g.acceptable and g.id is not None)
+    if ids:
+        return f"{line} Next: xpt accept {' '.join(ids)}"
+    return f"{line} Next: xpt failures"
+
+
+def _entries(failures: Sequence[Failure]) -> list[tuple[Failure, list[str]]]:
+    """Fold parametrized cases that fail the same way into the first case."""
+    entries: dict[tuple[object, ...], tuple[Failure, list[str]]] = {}
+    for f in failures:
+        match = _CASE.match(f.test)
+        if match is None:
+            entries[(f.test, f.when)] = (f, [])
+            continue
+        key = (match["base"], f.when, f.where.path, f.where.line, _kind(f))
+        if key in entries:
+            entries[key][1].append(match["case"])
+        else:
+            entries[key] = (f, [])
+    return list(entries.values())
+
+
+def _kind(f: Failure) -> str:
+    detail = f.where.detail
+    return detail.type if isinstance(detail, Raised) else type(detail).__name__
+
+
+def _block(f: Failure, cases: Sequence[str], groups: dict[SiteKey, Group], lim: Limits) -> Lines:
+    label = "FAILED" if f.when == "call" else "ERROR"
+    phase = "" if f.when == "call" else f" ({f.when})"
+    at = f.where.path if f.where.line is None else f"{f.where.path}:{f.where.line}"
+    where = f" in {f.where.function}" if f.where.function else ""
+    lines = [f"{label} {f.test}{phase}" + ("" if at == f.test else f"  {at}{where}")]
+    if cases:
+        lines.append(f"  also fails: {' '.join(cases)}")
+    lines += _detail(f, groups, lim)
+    for stream, text in f.output:
+        lines += [f"  {stream}: {cut(line, lim.width)}" for line in _tail(text, lim.output)]
+    if lim.traceback and f.traceback:
+        lines += ["  traceback:", *(f"    {line}" for line in f.traceback.splitlines())]
+    return lines
+
+
+def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
+    detail = f.where.detail
+    match detail:
+        case Expected():
+            o = detail.observation
+            site = o.site
+            g = None if isinstance(site, Unlocatable) else groups.get(site.key)
+            lines = [f"  {(g.id if g else None) or '-'}  {g.status if g else o.status}"]
+            if o.expected is not None and o.actual is not None:
+                return lines + _changes(diff(o.expected, o.actual), lim)
+            if o.actual is not None:
+                return [*lines, f"  actual: {show(o.actual, lim.width)}"]
+            return [*lines, f"  {cut(o.detail, lim.message)}"]
+        case Compared():
+            found = diff(detail.left, detail.right)
+            return ["  assert left == right, left -> right:", *_changes(found, lim)]
+        case Raised():
+            return _raised(detail, lim)
+        case Text():
+            return _text(detail.text, lim)
+
+
+def _changes(found: Diff, lim: Limits) -> Lines:
+    return changes(found, limit=lim.changes, width=lim.width)
+
+
+def _raised(r: Raised, lim: Limits) -> Lines:
+    if r.type != "AssertionError":
+        message = " ".join(r.message.split())
+        return [f"  {cut(f'{r.type}: {message}' if message else r.type, lim.message)}"]
+    first, *rest = r.message.splitlines() or [""]
+    lines = [f"AssertionError: {first}" if first else "AssertionError", *rest]
+    return [f"  {cut(line, lim.message)}" for line in _head(lines, lim.changes)]
+
+
+def _text(text: str, lim: Limits) -> Lines:
+    lines = text.splitlines()
+    errors = [line for line in lines if line.startswith("E ")]
+    shown = errors or _tail(text, lim.changes)
+    return [f"  {cut(line, lim.message)}" for line in shown]
+
+
+def _head(lines: Sequence[str], limit: int | None) -> list[str]:
+    if limit is None or len(lines) <= limit:
+        return list(lines)
+    return [*lines[:limit], f"... {len(lines) - limit} more lines"]
+
+
+def _tail(text: str, limit: int | None) -> list[str]:
+    lines = text.rstrip("\n").splitlines()
+    return lines if limit is None else lines[-limit:]
+
+
+def report_json(session: Session) -> dict[str, Json]:
+    groups = expect_groups(session.failures)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "exit_code": session.exit_code,
+        "summary": footer(session, groups),
+        "counts": list(session.counts),
+        "duration": session.seconds,
+        "run": session.run,
+        "failures": [_failure_json(f, groups) for f in session.failures],
+    }
+
+
+def _failure_json(f: Failure, groups: dict[SiteKey, Group]) -> dict[str, Json]:
+    data: dict[str, Json] = {
+        "test": f.test,
+        "when": f.when,
+        **where_json(f.where),
+        "output": dict(f.output),
+        "traceback": f.traceback,
+    }
+    detail = f.where.detail
+    if isinstance(detail, Expected) and not isinstance(detail.observation.site, Unlocatable):
+        g = groups.get(detail.observation.site.key)
+        if g is not None:
+            data["group"] = group_json(g)
+    if isinstance(detail, Compared):
+        found = diff(detail.left, detail.right)
+        data["changes"] = [change_json(c) for c in found.changes]
+        data["unchanged"] = found.unchanged
+    return data

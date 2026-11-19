@@ -46,15 +46,18 @@ def new_run_id() -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class _Environment:
+class Environment:
     record: bool
     worker: str
+    report: str | None
 
 
-def _environment() -> _Environment:
-    return _Environment(
+def environment() -> Environment:
+    """Every environment variable xpt reads."""
+    return Environment(
         record=not os.environ.get("XPT_NO_RECORD"),
         worker=os.environ.get("PYTEST_XDIST_WORKER") or "main",
+        report=os.environ.get("XPT_REPORT") or None,
     )
 
 
@@ -76,13 +79,13 @@ class Recorder:
 
     @classmethod
     def from_environment(cls) -> Recorder:
-        env = _environment()
+        env = environment()
         return cls(Path.cwd(), new_run_id(), env.worker, env.record)
 
     def configure(self, root: Path, run: str, worker: str, *, record: bool) -> None:
         self._close()
         self.root, self.run, self.worker = root, run, worker
-        self.enabled = record and _environment().record
+        self.enabled = record and environment().record
         self.managed = True
         self.test = None
 
@@ -174,7 +177,7 @@ def _read(root: Path, path: Path) -> list[Observation]:
     with path.open(encoding="utf-8") as lines:
         for number, line in enumerate(lines, 1):
             try:
-                observations.append(_decode(json.loads(line)))
+                observations.append(from_record(json.loads(line)))
             except ValueError as error:
                 raise RecordError(f"{shown}:{number}: {_reason(error)}") from error
     return observations
@@ -187,6 +190,10 @@ def _reason(error: ValueError) -> str:
 
 
 def _encode(o: Observation) -> str:
+    return json.dumps(to_record(o), ensure_ascii=False, allow_nan=False)
+
+
+def to_record(o: Observation) -> dict[str, object]:
     record: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "run": o.run,
@@ -199,7 +206,7 @@ def _encode(o: Observation) -> str:
         record["expected"] = to_json(o.expected)
     if o.actual is not None:
         record["actual"] = to_json(o.actual)
-    return json.dumps(record, ensure_ascii=False, allow_nan=False)
+    return record
 
 
 def _encode_site(site: CallSite | Unlocatable) -> dict[str, object]:
@@ -224,7 +231,7 @@ def _without_values(o: Observation, size: int) -> Observation:
     return Observation(o.run, o.test, o.site, o.status, None, None, detail)
 
 
-def _decode(data: object) -> Observation:
+def from_record(data: object) -> Observation:
     record = _object(data, "the record")
     version = record.get("schema_version")
     if version != SCHEMA_VERSION:

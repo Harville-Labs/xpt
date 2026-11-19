@@ -39,13 +39,13 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["docs/prototypes"]
+extend-exclude = ["docs/prototypes", "bench"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ty.src]
-exclude = ["docs/prototypes"]
+exclude = ["docs/prototypes", "bench"]
 
 [tool.ty.environment]
 extra-paths = ["tests"]

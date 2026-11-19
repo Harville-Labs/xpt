@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from xpt import decisions, record
+from xpt.accept import AcceptResult
 from xpt.failure import Failure, Text, Where, streams, where_from_json
 from xpt.summary import Session, limits, report_json, report_lines
 
@@ -17,6 +18,8 @@ try:
     from pytest import TerminalReporter
 except ImportError:  # pytest exports it from 8.4; older releases only have the private path.
     from _pytest.terminal import TerminalReporter
+
+CREATED = pytest.StashKey[AcceptResult]()
 
 ISSUES = "https://github.com/Harville-Labs/xpt/issues"
 _NOT_A_TEST_RUN = (
@@ -198,6 +201,7 @@ class AgentReporter(TerminalReporter):  # ty: ignore[subclass-of-final-class]
             exit_code=int(session.exitstatus) if session is not None else 0,
             run=run,
             rejected=self._rejected() if run else frozenset(),
+            created=self.config.stash.get(CREATED, None),
         )
 
     def _rejected(self) -> frozenset[decisions.Rejection]:

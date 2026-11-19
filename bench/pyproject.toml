@@ -1,0 +1,30 @@
+[project]
+name = "xpt-bench"
+version = "0.0.0"
+description = "Measures how coding agents fix failing test suites with and without xpt's report."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+xpt-bench = "xpt_bench.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["pytest>=9", "ruff>=0.14", "ty>=0.0.1a0"]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["tasks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ty.src]
+exclude = ["tasks"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "-p", "no:cacheprovider"]

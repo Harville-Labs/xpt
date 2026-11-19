@@ -63,7 +63,7 @@ class _Printer:
     ) -> str:
         flat = prefix + self.flat(value, path) + suffix
         group = self.group(value, path)
-        if group is None or not group.children or column + _width(flat) <= self.width:
+        if group is None or not group.children or column + display_width(flat) <= self.width:
             return flat
         inner = indent + INDENT
         pad = " " * inner
@@ -77,7 +77,7 @@ class _Printer:
             key = self.render(c.key, parent, indent, indent, "", tail)
             if "\n" in key:
                 head, _, last = key[: -len(tail)].rpartition("\n")
-                value = self.render(c.value, c.path, indent, _width(last), ": ", suffix)
+                value = self.render(c.value, c.path, indent, display_width(last), ": ", suffix)
                 return head + "\n" + last + value
             return key
         return self.render(c.value, c.path, indent, indent, c.label, suffix)
@@ -86,7 +86,7 @@ class _Printer:
         group = self.group(c.value, c.path)
         if group is None or not group.children:
             return False
-        return indent + _width(c.label + group.opener) <= self.width
+        return indent + display_width(c.label + group.opener) <= self.width
 
     def splits(self, value: Value, path: Path) -> bool:
         group = self.group(value, path)
@@ -156,7 +156,7 @@ def _triple_quotable(s: str) -> bool:
     )
 
 
-def _width(s: str) -> int:
+def display_width(s: str) -> int:
     return sum(_char_width(c) for c in s)
 
 

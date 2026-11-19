@@ -13,20 +13,21 @@ from functools import lru_cache
 from pathlib import Path
 from types import FrameType
 
-SiteKey = tuple[str, str, int]
+SiteKey = tuple[str, str, str, int]
 
 
 @dataclass(frozen=True, slots=True)
 class CallSite:
     path: str
     qualname: str
+    callee: str
     ordinal: int
     arg_sha: str
     line: int
 
     @property
     def key(self) -> SiteKey:
-        return (self.path, self.qualname, self.ordinal)
+        return (self.path, self.qualname, self.callee, self.ordinal)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,14 +65,14 @@ def locate(frame: FrameType, root: Path) -> CallSite | Unlocatable:
         return unlocatable(
             f"{path} has no source file; the comparison still runs, but xpt cannot rewrite it."
         )
-    scopes = _scopes(filename, source)
-    if isinstance(scopes, SyntaxError):
+    found_scopes = scopes(filename, source)
+    if isinstance(found_scopes, SyntaxError):
         return unlocatable(
-            f"{path} no longer parses ({scopes.msg}, line {scopes.lineno}). "
+            f"{path} no longer parses ({found_scopes.msg}, line {found_scopes.lineno}). "
             "Fix the file and run the tests again."
         )
     qualname = _enclosing_qualname(code.co_qualname)
-    calls = scopes.get(qualname, [])
+    calls = found_scopes.get(qualname, [])
     if col is None:
         found = _outermost_on_line(calls, line)
         if len(found) > 1:
@@ -88,10 +89,38 @@ def locate(frame: FrameType, root: Path) -> CallSite | Unlocatable:
             "The file probably changed after it was imported. Run the tests again."
         )
     call = found[0]
-    callee = ast.unparse(call.func)
+    return CallSite(path, qualname, callee(call), ordinal(calls, call), arg_sha(source, call), line)
+
+
+def callee(call: ast.Call) -> str:
+    return ast.unparse(call.func)
+
+
+def ordinal(calls: list[ast.Call], call: ast.Call) -> int:
+    """Count the calls to the same callee before `call` in its scope."""
+    name = callee(call)
     before = itertools.takewhile(lambda c: c is not call, calls)
-    ordinal = sum(1 for c in before if ast.unparse(c.func) == callee)
-    return CallSite(path, qualname, ordinal, _arg_sha(source, call), line)
+    return sum(1 for c in before if callee(c) == name)
+
+
+def find_call(calls: list[ast.Call], name: str, index: int) -> ast.Call | None:
+    """Find the call that `ordinal` numbers `index` among the calls to `name`."""
+    same = [c for c in calls if callee(c) == name]
+    return same[index] if index < len(same) else None
+
+
+def expected_arg(call: ast.Call) -> ast.expr | None:
+    if len(call.args) > 1:
+        return call.args[1]
+    return next((k.value for k in call.keywords if k.arg == "expected"), None)
+
+
+def arg_sha(source: str, call: ast.Call) -> str:
+    expected = expected_arg(call)
+    if expected is None:
+        return ""
+    segment = ast.get_source_segment(source, expected) or ""
+    return hashlib.sha256(segment.encode("utf-8")).hexdigest()
 
 
 def site_id(site: CallSite) -> str:
@@ -143,18 +172,8 @@ def _outermost_on_line(calls: list[ast.Call], line: int) -> list[ast.Call]:
     return [c for c in starting if id(c) not in inner]
 
 
-def _arg_sha(source: str, call: ast.Call) -> str:
-    expected = next((k.value for k in call.keywords if k.arg == "expected"), None)
-    if len(call.args) > 1:
-        expected = call.args[1]
-    if expected is None:
-        return ""
-    segment = ast.get_source_segment(source, expected) or ""
-    return hashlib.sha256(segment.encode("utf-8")).hexdigest()
-
-
 @lru_cache(maxsize=64)
-def _scopes(filename: str, source: str) -> dict[str, list[ast.Call]] | SyntaxError:
+def scopes(filename: str, source: str) -> dict[str, list[ast.Call]] | SyntaxError:
     try:
         tree = ast.parse(source, filename)
     except SyntaxError as error:

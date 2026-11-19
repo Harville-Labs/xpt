@@ -15,7 +15,7 @@ from xpt.record import (
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Dict, Float, Int, Null, Seq, Str
 
-SITE = CallSite("tests/test_a.py", "test_a", 0, "ab" * 32, 7)
+SITE = CallSite("tests/test_a.py", "test_a", "expect", 0, "ab" * 32, 7)
 
 
 def observation(run: str, **changes: object) -> Observation:

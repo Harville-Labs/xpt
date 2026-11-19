@@ -110,12 +110,8 @@ class Recorder:
             shutil.rmtree(old, ignore_errors=True)
 
     def _open(self) -> TextIO:
-        directory = self.root / DIRECTORY
-        run_dir = directory / "runs" / self.run
+        run_dir = state_directory(self.root) / "runs" / self.run
         run_dir.mkdir(parents=True, exist_ok=True)
-        gitignore = directory / ".gitignore"
-        if not gitignore.exists():
-            gitignore.write_text("*\n", encoding="utf-8")
         self._file = (run_dir / f"{self.worker}.jsonl").open("a", encoding="utf-8", newline="\n")
         if not self.managed:
             self.managed = True
@@ -129,6 +125,16 @@ class Recorder:
 
 
 recorder = Recorder.from_environment()
+
+
+def state_directory(root: Path) -> Path:
+    """Create `.xpt/` under `root` if needed, ignored by git, and return it."""
+    directory = root / DIRECTORY
+    directory.mkdir(parents=True, exist_ok=True)
+    gitignore = directory / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("*\n", encoding="utf-8")
+    return directory
 
 
 def load_run(root: Path, run: str | None = None) -> list[Observation]:
@@ -194,6 +200,7 @@ def _encode_site(site: CallSite | Unlocatable) -> dict[str, object]:
         "kind": "call",
         "path": site.path,
         "qualname": site.qualname,
+        "callee": site.callee,
         "ordinal": site.ordinal,
         "arg_sha": site.arg_sha,
         "line": site.line,
@@ -235,6 +242,7 @@ def _decode_site(site: dict[str, object]) -> CallSite | Unlocatable:
         return CallSite(
             _str(site, "path"),
             _str(site, "qualname"),
+            _str(site, "callee"),
             _int(site, "ordinal"),
             _str(site, "arg_sha"),
             _int(site, "line"),

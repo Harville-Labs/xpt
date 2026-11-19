@@ -79,11 +79,13 @@ CallSite        # where an expect() call lives in source
   arg_sha: str            # sha256 of the expected-argument source text, or "" when absent
 
 Value           # a serialized, typed value tree. Never code, never pickle.
-  {"t": "dict", "items": [[Value, Value], ...]}
-  {"t": "list" | "tuple" | "set" | "frozenset", "items": [Value, ...]}
-  {"t": "str" | "int" | "float" | "bool" | "none", "v": ...}
-  {"t": "dataclass", "type": "module:Qualname", "fields": [[name, Value], ...]}
-  {"t": "adapter", "name": "numpy.ndarray", "data": ...}
+  "a" | 1 | 1.5 | true | null | [Value, ...]     # plain JSON where JSON keeps the type
+  {"tuple" | "set" | "frozenset": [Value, ...]}
+  {"float": "nan" | "inf" | "-inf"}
+  {"dict": {str: Value, ...}}                      # every key is a str
+  {"dict": [[Value, Value], ...]}                  # any other keys
+  {"module:Qualname": {field: Value, ...}}         # a dataclass
+  {"adapter": {"name": "numpy.ndarray", "data": Value}}
 
 Observation     # one call of expect() in one run
   id: str                 # stable short id, see Identity

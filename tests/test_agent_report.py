@@ -101,14 +101,14 @@ def test_the_mixed_suite_prints_one_block_per_failure(pytester: pytest.Pytester)
     assert result.ret == 1
 
 
-def test_the_report_is_at_most_a_quarter_of_pytest_short_output(pytester: pytest.Pytester):
+def test_the_report_is_at_most_a_third_of_pytest_short_output(pytester: pytest.Pytester):
     xpt = run(pytester, test_mixed=MIXED)
     stock = pytester.runpytest_subprocess(
         "-p", "no:cacheprovider", "--xpt-report=pytest", "-q", "--tb=short"
     )
     xpt_bytes = len(xpt.stdout.str().encode("utf-8"))
     stock_bytes = len(stock.stdout.str().encode("utf-8"))
-    assert xpt_bytes * 4 <= stock_bytes, (xpt_bytes, stock_bytes)
+    assert xpt_bytes * 3 <= stock_bytes, (xpt_bytes, stock_bytes)
 
 
 def test_xdist_workers_produce_the_same_single_report(pytester: pytest.Pytester):

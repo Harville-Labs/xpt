@@ -1,6 +1,6 @@
 [project]
 name = "xpt"
-version = "0.1.0"
+version = "0.1.1"
 description = "Inline expect tests for Python, built for coding agents and the people reviewing their work."
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ classifiers = [
 ]
 
 [project.urls]
+Documentation = "https://harville-labs.github.io/xpt/"
 Repository = "https://github.com/Harville-Labs/xpt"
 
 [project.scripts]

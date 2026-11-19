@@ -5,9 +5,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from xpt.literal import float_literal, quote
-from xpt.path import Attr, Index, Key, Path
-from xpt.serialize import UnsupportedValue
-from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Seq, Set, Str, Value
+from xpt.path import Index, Key, Path, field_path
+from xpt.unsupported import UnsupportedValue
+from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Ref, Seq, Set, Str, Value
 
 INDENT = 4
 
@@ -24,7 +24,8 @@ def to_source(
 
     `indent` is the indentation of the statement holding the expression, and `column`
     is where the expression starts, which defaults to `indent`. `names` maps a dataclass
-    type ("module:Qualname") to the name that refers to it where the source is written.
+    type or reference ("module:Qualname") to the name that refers to it where the source
+    is written.
     """
     if isinstance(value, Str) and _triple_quotable(value.v):
         return f'"""{value.v}"""'
@@ -94,6 +95,8 @@ class _Printer:
 
     def flat(self, value: Value, path: Path) -> str:
         group = self.group(value, path)
+        if isinstance(value, Ref):
+            return self.named(value.type, path)
         if group is None:
             return _atom(value)
         parts = [c.label + self.flat(c.value, c.path) for c in group.children]
@@ -118,12 +121,15 @@ class _Printer:
                 )
                 return _Group("{", labelled, "}")
             case Dataclass(type_id, fields):
-                name = self.name(type_id)
-                if name is None:
-                    raise UnsupportedValue(path, f"is a {type_id} that is not importable by name")
-                labelled = tuple(_Child(f"{f}=", v, (*path, Attr(f))) for f, v in fields)
-                return _Group(f"{name}(", labelled, ")")
+                labelled = tuple(_Child(f and f"{f}=", v, field_path(path, f)) for f, v in fields)
+                return _Group(f"{self.named(type_id, path)}(", labelled, ")")
         return None
+
+    def named(self, type_id: str, path: Path) -> str:
+        name = self.name(type_id)
+        if name is None:
+            raise UnsupportedValue(path, f"is a {type_id} that is not importable by name")
+        return name
 
 
 def _indexed(items: tuple[Value, ...], path: Path) -> tuple[_Child, ...]:

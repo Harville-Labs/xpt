@@ -9,7 +9,7 @@ from xpt.group import Group
 from xpt.rewrite import rewrite
 from xpt.serialize import serialize
 from xpt.site import CallSite, arg_sha, find_call, scopes
-from xpt.value import Dataclass, Int, Seq, Str, Value
+from xpt.value import Dataclass, Int, Ref, Seq, Str, Value
 
 
 def target(source: str, actual: Value) -> Group:
@@ -131,8 +131,8 @@ def test_a_dataclass_the_module_does_not_import_is_skipped():
     [outcome] = plan.outcomes
     assert outcome.status == "skipped"
     assert outcome.reason == (
-        "test_it.py:2 needs the name Point, which test_it.py does not import at module level. "
-        "Import it and accept again."
+        "test_it.py:2 needs the name Point from values, which test_it.py does not import at "
+        "module level. Import values or Point and accept again."
     )
     assert plan.data == source.encode("utf-8")
 
@@ -172,3 +172,36 @@ def test_every_accepted_value_leaves_the_call_ruff_formatted(obj: object, indent
     source = "\n".join([*blocks, f"{' ' * indent}expect({'a' * size})"]) + "\n"
     text = rewritten(source, serialize(obj))
     assert ruff_changes(text) == ""
+
+
+ARRAY = Dataclass("numpy:array", (("", Seq("list", (Int(1),))), ("dtype", Str("int64"))))
+
+
+def test_an_adapter_value_is_written_through_the_module_alias_the_file_imports():
+    source = "import numpy as np\n\ndef test_it():\n    expect(make())\n"
+    assert rewritten(source, ARRAY).endswith('    expect(make(), np.array([1], dtype="int64"))\n')
+
+
+def test_a_reference_is_written_through_a_plain_module_import():
+    tensor = Dataclass("torch:tensor", (("", Seq("list", ())), ("dtype", Ref("torch:float32"))))
+    source = "import torch\n\ndef test_it():\n    expect(make())\n"
+    expected = "    expect(make(), torch.tensor([], dtype=torch.float32))\n"
+    assert rewritten(source, tensor).endswith(expected)
+
+
+def test_a_nested_qualname_is_written_through_a_module_imported_from_its_package():
+    message = Dataclass("google.protobuf.descriptor_pb2:DescriptorProto.ExtensionRange", ())
+    source = "from google.protobuf import descriptor_pb2\n\ndef test_it():\n    expect(make())\n"
+    expected = "    expect(make(), descriptor_pb2.DescriptorProto.ExtensionRange())\n"
+    assert rewritten(source, message).endswith(expected)
+
+
+def test_an_adapter_value_whose_module_is_not_imported_is_skipped():
+    source = "def test_it():\n    expect(make())\n"
+    plan = rewrite("test_it.py", source.encode("utf-8"), [target(source, ARRAY)])
+    [outcome] = plan.outcomes
+    assert (outcome.status, outcome.reason) == (
+        "skipped",
+        "test_it.py:2 needs the name array from numpy, which test_it.py does not import at "
+        "module level. Import numpy or array and accept again.",
+    )

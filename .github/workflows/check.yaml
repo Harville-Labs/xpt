@@ -27,6 +27,19 @@ jobs:
       - run: uv run ty check
       - run: uv run pytest
 
+  adapters:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+      - run: uv run --locked --group adapters pytest tests/adapters
+
   pytest-versions:
     strategy:
       fail-fast: false

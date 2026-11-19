@@ -10,6 +10,12 @@ uv sync --locked && uv run ruff format --check && uv run ruff check && uv run ty
 
 CI runs the same steps on Python 3.11 to 3.14 on Linux, macOS, and Windows.
 
+The adapter tests in `tests/adapters/` skip unless NumPy, PyTorch, pandas, Pydantic, attrs, and protobuf are installed. Run them with the `adapters` dependency group, which CI does in its own job:
+
+```bash
+uv run --locked --group adapters pytest tests/adapters
+```
+
 ## Layout
 
 ```
@@ -23,6 +29,7 @@ docs/prototypes/  throwaway prototypes, excluded from lint and type checks
 ## Invariants
 
 - **No runtime dependencies.** `dependencies = []` in `pyproject.toml`, and `tests/test_package.py` enforces it. pytest support is an optional plugin. This repository therefore parses its own recorded files with the standard library instead of Pydantic. That departs from the shared Python standard on purpose: a test library that users install everywhere must not pull a dependency tree into their environment.
+- **Adapters never import their library.** `src/xpt/adapters.py` recognizes NumPy, PyTorch, pandas, Pydantic, attrs, and protobuf types by class name through the MRO and works only on objects the test already built.
 - **Recorded values are data.** Never `eval`, `exec`, or unpickle anything read from `.xpt/`. Values are rebuilt from the typed JSON tree only.
 - **Source files are written only through accept.** Test runs never edit source. `pytest --expect-create` applies changes after the session through the same accept path.
 - **Accept never writes stale changes.** It checks the expected argument's fingerprint and refuses if the source changed since the run.

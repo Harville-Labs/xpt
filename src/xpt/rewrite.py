@@ -13,7 +13,7 @@ from xpt import layout
 from xpt.group import Group
 from xpt.site import Unlocatable, arg_sha, expected_arg, find_call, scopes
 from xpt.source import display_width, to_source
-from xpt.value import Dataclass, Dict, Seq, Set, Value
+from xpt.value import Dataclass, Dict, Ref, Seq, Set, Value
 
 OutcomeStatus = Literal["accepted", "already_accepted", "stale", "skipped"]
 
@@ -59,6 +59,7 @@ class _File:
     scopes: dict[str, list[ast.Call]]
     comments: tuple[int, ...]
     imported: frozenset[str]
+    modules: dict[str, str]
 
     def offset(self, line: int, col: int) -> int:
         return self.starts[line - 1] + col
@@ -139,8 +140,9 @@ def _read(path: str, data: bytes) -> _File | str:
         for t in tokenize.generate_tokens(io.StringIO(text).readline)
         if t.type == tokenize.COMMENT
     )
-    imported = frozenset(_module_names(ast.parse(text, path)))
-    return _File(path, data, text, starts, newline, found, comments, imported)
+    tree = ast.parse(text, path)
+    imported = frozenset(_module_names(tree))
+    return _File(path, data, text, starts, newline, found, comments, imported, _modules(tree))
 
 
 def _module_names(tree: ast.Module) -> Iterator[str]:
@@ -153,6 +155,24 @@ def _module_names(tree: ast.Module) -> Iterator[str]:
             yield node.name
         elif isinstance(node, ast.Assign):
             yield from (t.id for t in node.targets if isinstance(t, ast.Name))
+
+
+def _modules(tree: ast.Module) -> dict[str, str]:
+    """Map each dotted name the file imports at module level to the expression that names it."""
+    found: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    found[a.name] = a.asname
+                else:
+                    parts = a.name.split(".")
+                    for i in range(1, len(parts) + 1):
+                        found.setdefault(".".join(parts[:i]), ".".join(parts[:i]))
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for a in node.names:
+                found[f"{node.module}.{a.name}"] = a.asname or a.name
+    return found
 
 
 def _plan(file: _File, group: Group) -> tuple[Outcome, _Edit | None]:
@@ -253,28 +273,36 @@ def _encode(file: _File, text: str) -> bytes:
 
 
 def _names(file: _File, value: Value, where: str) -> dict[str, str]:
-    names = {}
-    for type_id in sorted(set(_dataclass_types(value))):
-        name = type_id.rpartition(":")[2]
-        if name.partition(".")[0] not in file.imported:
-            raise _Unwritable(
-                f"{where} needs the name {name}, which {file.path} does not import at module "
-                "level. Import it and accept again."
-            )
-        names[type_id] = name
-    return names
+    return {type_id: _name(file, type_id, where) for type_id in sorted(set(_type_ids(value)))}
 
 
-def _dataclass_types(value: Value) -> Iterator[str]:
+def _name(file: _File, type_id: str, where: str) -> str:
+    module, _, qualname = type_id.partition(":")
+    head, dot, rest = qualname.partition(".")
+    if imported := file.modules.get(f"{module}.{head}"):
+        return imported + dot + rest
+    if alias := file.modules.get(module):
+        return f"{alias}.{qualname}"
+    if head in file.imported:
+        return qualname
+    raise _Unwritable(
+        f"{where} needs the name {qualname} from {module}, which {file.path} does not import "
+        f"at module level. Import {module} or {head} and accept again."
+    )
+
+
+def _type_ids(value: Value) -> Iterator[str]:
     match value:
         case Dataclass(type_id, fields):
             yield type_id
             for _, v in fields:
-                yield from _dataclass_types(v)
+                yield from _type_ids(v)
+        case Ref(type_id):
+            yield type_id
         case Seq(_, items) | Set(_, items):
             for v in items:
-                yield from _dataclass_types(v)
+                yield from _type_ids(v)
         case Dict(items):
             for k, v in items:
-                yield from _dataclass_types(k)
-                yield from _dataclass_types(v)
+                yield from _type_ids(k)
+                yield from _type_ids(v)

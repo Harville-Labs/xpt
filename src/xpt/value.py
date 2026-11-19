@@ -66,7 +66,14 @@ class Dataclass:
     fields: tuple[tuple[str, Value], ...]
 
 
-Value = Str | Int | Float | Bool | Null | Seq | Set | Dict | Dataclass
+@dataclass(frozen=True, slots=True)
+class Ref:
+    """A module-level name such as torch.float32, as its "module:qualname" id."""
+
+    type: str
+
+
+Value = Str | Int | Float | Bool | Null | Seq | Set | Dict | Dataclass | Ref
 
 Json = object
 
@@ -93,6 +100,8 @@ def to_json(value: Value) -> Json:
             return {"dict": [[to_json(k), to_json(v)] for k, v in items]}
         case Dataclass(name, fields):
             return {name: {f: to_json(v) for f, v in fields}}
+        case Ref(name):
+            return {"ref": name}
 
 
 def canonical(value: Value) -> str:
@@ -137,11 +146,13 @@ def _tagged(tag: object, payload: object) -> Value:
             return Dict(tuple((Str(k), from_json(v)) for k, v in _fields(payload)))
         case "dict", list():
             return Dict(tuple((from_json(k), from_json(v)) for k, v in map(_pair, payload)))
+        case "ref", str() if ":" in payload:
+            return Ref(payload)
         case str(), dict() if ":" in tag:
             return Dataclass(tag, tuple((k, from_json(v)) for k, v in _fields(payload)))
     raise InvalidValue(
         f"unknown tagged value {{{tag!r}: {payload!r}}}. Tags are tuple, set, frozenset, "
-        'float, dict, or a dataclass type like "module:Qualname".'
+        'float, dict, ref, or a dataclass type like "module:Qualname".'
     )
 
 

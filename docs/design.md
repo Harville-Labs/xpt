@@ -91,8 +91,8 @@ Value           # a serialized, typed value tree. Never code, never pickle.
   {"float": "nan" | "inf" | "-inf"}
   {"dict": {str: Value, ...}}                      # every key is a str
   {"dict": [[Value, Value], ...]}                  # any other keys
-  {"module:Qualname": {field: Value, ...}}         # a dataclass
-  {"adapter": {"name": "numpy.ndarray", "data": Value}}
+  {"module:Qualname": {field: Value, ...}}         # a constructor call; field "" is positional
+  {"ref": "module:qualname"}                       # a module-level name such as torch.float32
 
 Observation     # one failed call of expect() in one run
   run: str                # run id
@@ -269,21 +269,17 @@ These are separate functions over the `Value` tree:
 - `diff(expected, actual) -> [Change]` walks two trees. Dicts compare by key, sequences by index, sets as sorted members. The walk is pure and easy to test exhaustively.
 - `to_source(Value, indent, width) -> str` prints a tree as a Python literal. Dict order is kept as observed. Set members are sorted. Floats use `repr`, which round-trips. It fits on one line when possible, and otherwise uses one element per line with a trailing comma, so the output already matches ruff's format.
 
-Comparison is Python `==` on the reconstructed expected value, with `diff` used only to explain a failure. That keeps xpt's results identical to what a human writing `assert actual == expected` would get.
+Comparison is Python `==` on the reconstructed expected value, except for arrays, tensors, and pandas objects (see below), with `diff` used only to explain a failure. That keeps xpt's results identical to what a human writing `assert actual == expected` would get.
 
 A dataclass prints as `Point(x=1, y=2)`. At record time we check that `Point` resolves to the same class in the test module's globals. If it does not, we mark the value unsupported instead of writing code that will raise `NameError`.
 
-Adapters are a small registry:
+Adapters (`src/xpt/adapters.py`) turn NumPy, PyTorch, pandas, Pydantic, attrs, and protobuf values into the same constructor-call node a dataclass uses, so `diff`, `to_source`, and accept need no adapter code. `np.array([[1, 2]], dtype="int64")` is `{"numpy:array": {"": [[1, 2]], "dtype": "int64"}}`. The field named `""` is the positional argument and adds no step to a diff path, so a changed element reads `value[0][1]`. A dtype that must be a name rather than a string, such as `torch.float32`, is a `ref` node. Fields are matched by name in a diff, so a protobuf field set on only one side reads as added or removed.
 
-```python
-@register(numpy.ndarray)
-class NDArray:
-    def serialize(self, value) -> Value: ...
-    def to_source(self, value: Value, ctx) -> str: ...
-    def diff(self, expected, actual, *, atol, rtol) -> list[Change]: ...
-```
+The registry maps a class name such as `numpy.ndarray` to its adapter and is searched through the value's MRO. xpt never imports the libraries, so there are no extras and no runtime dependencies; the adapter runs only on objects that already exist. There is no public `register` yet.
 
-There is no `supports()` method and no `compare()`. The registry looks up types through the MRO. Comparison stays `==`, unless the adapter defines tolerance-aware `diff`. The adapters for NumPy, pandas, PyTorch, and Pydantic import lazily and live behind extras.
+Comparison is `==` everywhere except for arrays, tensors, and pandas objects, whose `==` is element-wise and broadcasts: `np.array([1]) == np.array([[1.0]])` is truthy. `equal` (`src/xpt/equal.py`) compares those by type, shape, dtype, and elements, and walks lists, tuples, dicts, and dataclasses item by item so an array nested in a dict is held to the same rule.
+
+Arrays over 10,000 elements are refused rather than written inline. A summary with a hash, tolerances (`atol`, `rtol`), and a mismatch count with the first differing indices remain open.
 
 Acceptance never runs code from the record. It builds source text from the `Value` tree. It never calls `eval`, `pickle`, or the observed object's `__repr__`.
 
@@ -396,6 +392,6 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M1. Core assertion.** `Value`, `serialize`, `diff`, `to_source` for builtins and dataclasses. `expect()` compares and raises with the compact message. No recording yet.
 - **M2. Record and accept.** Call-site identity, JSON Lines recorder, `failures` / `show` / `accept` / `reject` / `clean`, fingerprint checks, atomic multi-edit writes, `--expect-create`. This is the differentiator and the MVP line.
 - **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests.
-- **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic extras with tolerances. An xdist test matrix.
+- **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic, attrs, and protobuf adapters are done. Tolerances, large-array summaries, and an xdist test matrix remain.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **M6. Release.** Name check, docs, PyPI.

@@ -4,8 +4,8 @@ from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Literal
 
-from xpt.path import Attr, Index, Key, Path
-from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Seq, Set, Str, Value
+from xpt.path import Index, Key, Path, field_path
+from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Ref, Seq, Set, Str, Value
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +45,8 @@ def norm(value: Value) -> Hashable:
             return ("dict", frozenset((norm(k), norm(v)) for k, v in items))
         case Dataclass(type_id, fields):
             return ("dataclass", type_id, tuple((f, norm(v)) for f, v in fields))
+        case Ref(type_id):
+            return ("ref", type_id)
 
 
 def leaves(value: Value) -> int:
@@ -95,7 +97,14 @@ class _Walk:
                 for k, v in theirs_items.values():
                     self.changes.append(Change((*path, Key(k)), "add", None, v))
             case Dataclass(et, ef), Dataclass(at, af) if et == at:
-                for (name, ev), (_, av) in zip(ef, af, strict=True):
-                    self.compare(ev, av, (*path, Attr(name)))
+                theirs_fields = dict(af)
+                for name, ev in ef:
+                    av = theirs_fields.pop(name, None)
+                    if av is None:
+                        self.changes.append(Change(field_path(path, name), "remove", ev, None))
+                    else:
+                        self.compare(ev, av, field_path(path, name))
+                for name, av in theirs_fields.items():
+                    self.changes.append(Change(field_path(path, name), "add", None, av))
             case _:
                 self.changes.append(Change(path, "replace", e, a))

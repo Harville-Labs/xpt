@@ -3,6 +3,8 @@ import re
 
 import pytest
 
+from xpt.cli import main
+
 DURATION = re.compile(r" in \d+\.\d\ds")
 
 MIXED = """\
@@ -343,3 +345,34 @@ def test_ok():
         {"path": 'value["a"]', "op": "replace", "expected": 2, "actual": 1},
         {"path": 'value["b"]', "op": "replace", "expected": "y", "actual": "x" * 300},
     ]
+
+
+REJECTABLE = """\
+from xpt import expect
+
+def test_a():
+    expect(1 + 1, 3)
+
+def test_b():
+    expect(2 + 2, 5)
+"""
+
+
+def test_a_rejected_group_is_marked_and_the_footer_stops_offering_it(pytester: pytest.Pytester):
+    first = lines(run(pytester, test_rejectable=REJECTABLE))
+    a, b = first[2].split()[0], first[7].split()[0]
+    assert first[-1] == f"2 failed in 0.00s. Next: xpt accept {' '.join(sorted([a, b]))}"
+    assert main(["reject", a, "--root", str(pytester.path)]) == 0
+    second = lines(run(pytester, test_rejectable=REJECTABLE))
+    assert second[2] == f"  {a}  mismatch  rejected"
+    assert second[-1] == f"2 failed in 0.00s. Next: xpt accept {b}"
+
+
+def test_a_malformed_decisions_file_is_named_and_the_report_still_prints(
+    pytester: pytest.Pytester,
+):
+    run(pytester, test_rejectable=REJECTABLE)
+    (pytester.path / ".xpt" / "decisions.jsonl").write_text("{\n", encoding="utf-8")
+    result = lines(run(pytester, test_rejectable=REJECTABLE))
+    assert result[0].startswith("xpt: .xpt/decisions.jsonl:1: not JSON")
+    assert result[-1].startswith("2 failed in 0.00s. Next: xpt accept ")

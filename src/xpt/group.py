@@ -24,7 +24,8 @@ class Group:
 
     `id` is the short display id, None for an unlocatable site. `actuals` holds the distinct
     actual values, one when the calls agree. `expected` is None when it was missing or when
-    the calls disagree on it. `detail` says why a group is not acceptable.
+    the calls disagree on it. `detail` says why a group is not acceptable. `rejected` means
+    its one actual value was rejected as a bug with `xpt reject`.
     """
 
     id: str | None
@@ -34,15 +35,21 @@ class Group:
     expected: Value | None
     tests: tuple[str, ...]
     detail: str
+    rejected: bool = False
 
     @property
     def acceptable(self) -> bool:
         return self.status in ("missing", "mismatch")
 
+    @property
+    def offered(self) -> bool:
+        """Whether to suggest accepting it: acceptable and not rejected."""
+        return self.acceptable and not self.rejected
+
 
 def missing(groups: Iterable[Group]) -> list[Group]:
-    """The groups whose expected argument is empty."""
-    return [g for g in groups if g.status == "missing"]
+    """The groups whose expected argument is empty and whose value was not rejected."""
+    return [g for g in groups if g.status == "missing" and not g.rejected]
 
 
 def group(observations: Iterable[Observation]) -> tuple[Group, ...]:

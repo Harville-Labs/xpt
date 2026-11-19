@@ -29,7 +29,8 @@ A run records what `expect` saw under `.xpt/`. Then:
 xpt failures          # each failed call site with its diff, and the next command
 xpt show a81f         # one call site, with its function and tests
 xpt accept a81f       # write the actual value into the test source
-xpt accept --all      # every acceptable call site
+xpt accept --all      # every acceptable call site that was not rejected
+xpt reject a81f       # the actual value is a bug; stop offering it for acceptance
 xpt runs              # recorded runs, newest first
 xpt clean             # delete .xpt/
 ```
@@ -42,7 +43,7 @@ xpt clean             # delete .xpt/
 
 The run still fails, because the filled expectations were empty when their tests ran. Run the tests again to see them pass.
 
-`xpt accept` writes without running the tests again, and refuses if that source changed since the run. Every command takes `--json`. Exit codes are 0 for done or nothing to do, 1 when failures remain or an accept was refused, and 2 for a usage error. `python -m xpt` works too, and `xpt.api` is the same surface for tools.
+`xpt accept` writes without running the tests again, and refuses if that source changed since the run. `xpt reject` records in `.xpt/decisions.jsonl` that a call site's actual value is a real bug. `xpt failures` and the pytest footer then mark that call site `rejected` and stop suggesting it, until a run records a different value there. Every command takes `--json`. Exit codes are 0 for done or nothing to do, 1 when failures remain or an accept or reject was refused, and 2 for a usage error. `python -m xpt` works too, and `xpt.api` is the same surface for tools.
 
 Status: early development, not released. Read [docs/design.md](docs/design.md) for the design and roadmap, and [docs/research.md](docs/research.md) for how expecttest, inline-snapshot, syrupy, and ApprovalTests compare. Plans are tracked as GitHub issues.
 

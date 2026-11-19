@@ -111,7 +111,9 @@ Group           # every failed observation of one call site in a run, built at r
   expected: Value | None  # None when missing, or when the calls disagree on it
   tests: [str]            # every test that reached the site
   detail: str             # why the group cannot be accepted, "" when it can
+  rejected: bool          # its one actual value matches a Rejection in decisions.jsonl
   acceptable              # derived: status is missing or mismatch
+  offered                 # derived: acceptable and not rejected; what footers suggest
 
 Outcome         # what accept did with one group
   group: Group
@@ -121,6 +123,15 @@ Outcome         # what accept did with one group
 AcceptResult
   outcomes: [Outcome]     # one per group, in the order given
   changed: [str]          # project-relative paths that were rewritten
+
+Rejection       # a call site's actual value rejected as a bug, one line of decisions.jsonl
+  site: (path, qualname, callee, ordinal)  # the CallSite identity, as for the display id
+  actual_sha: str         # sha256 of the actual value's canonical JSON
+
+RejectOutcome   # what reject did with one group
+  group: Group
+  status: "rejected" | "already_rejected" | "skipped"
+  reason: str             # why it was not recorded, "" otherwise
 
 Change
   path: [str | int]       # ["expression", "operator"]
@@ -180,21 +191,40 @@ xpt show <id>               one group with its function and tests, paths only, w
 xpt show <id> --full        no limits, plus both whole values
 xpt accept <id>... [--dry-run]
 xpt accept --missing        fill every missing expectation, nothing else
-xpt accept --all            every acceptable group; the rest are reported with their reason
+xpt accept --all            every group not rejected; those that cannot be accepted are reported with their reason
 xpt runs                    the recorded runs, newest first
 xpt clean                   delete .xpt/
-xpt reject <id>...          planned in #30
+xpt reject <id>...          record each group's actual value as a bug, never to be offered
 ```
 
-Every command takes `--json`, and `--root PATH` for a project other than the current directory. `failures`, `show`, and `accept` take `--run ID` to read an older run instead of the latest. `python -m xpt` runs the same command.
+Every command takes `--json`, and `--root PATH` for a project other than the current directory. `failures`, `show`, `accept`, and `reject` take `--run ID` to read an older run instead of the latest. `python -m xpt` runs the same command.
 
 Exit codes:
 
 - `0`: the command did what it was asked, or there is nothing to do.
-- `1`: `failures` found failures, or `accept` left a requested group stale or skipped.
-- `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
+- `1`: `failures` found failures, or `accept` or `reject` left a requested group stale or skipped.
+- `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record or decision, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
 
-Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. Accept is idempotent. Running it twice leaves the file as it was after the first run, because the second run finds the fingerprint already matches the accepted value and has nothing to do.
+Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. It moves to `rejected` when `xpt reject` records its actual value as a bug.
+
+### Rejection
+
+`xpt reject <id>...` is for an agent or a person who has read a diff and decided the actual value is a regression, not a new expectation. Without it, every later `xpt failures` and pytest footer suggests `xpt accept` for the same bug again, and an agent that follows the footer accepts it.
+
+A rejection is one line in `.xpt/decisions.jsonl`:
+
+```json
+{"schema_version": 1, "decision": "reject", "run": "20260101T120000-ab12", "site": {"path": "tests/test_parser.py", "qualname": "test_parser", "callee": "expect", "ordinal": 0}, "actual_sha": "<64 hex>"}
+```
+
+- It names the call site by its identity, the same four fields the display id hashes, so it survives line moves like the id does. `run` records where the decision came from and is not used to match.
+- It names the value by `actual_sha`, the sha256 of its canonical JSON (sorted keys, no spaces). It stores no value, so the file holds no test data and is never pruned.
+- A group is `rejected` when it is acceptable, has one actual value, and some line matches its site and that value's hash. Conflicts, unsupported values, and unlocatable sites have no single value to reject, so `reject` reports them `skipped` with the group's detail.
+- A rejection does not expire by time. It stops matching as soon as a run records a different actual value at that site, and that group is offered again. If the same wrong value comes back later, it is still marked rejected. `xpt clean` deletes the file with the rest of `.xpt/`.
+- Rejecting a value twice writes nothing the second time and reports `already_rejected`, so `reject` is idempotent.
+- `reject` rewrites the file whole to a temp file and moves it into place with `os.replace`, under the same `.xpt/accept.lock` as accept. A reader never sees a partial line, and two writers cannot drop each other's lines. A second writer fails on the held lock with exit code 2.
+
+`xpt failures` marks rejected groups instead of hiding them. The test still fails, and pytest still reports it, so a group missing from `failures` would leave an agent hunting for it. The heading reads `a81f  tests/test_parser.py:14  mismatch  rejected  1 test`, the JSON group carries `"rejected": true`, and the footer counts them (`1 acceptable, 1 rejected`) and leaves them out of `Next: xpt accept`. `acceptable` keeps its meaning, that the status allows a write. `xpt show` says the group was rejected and how to accept it anyway. The pytest report adds `rejected` after the status and leaves the group out of its footer. `accept --all` and `accept --missing` leave rejected groups out of their selection, as `--missing` leaves out mismatches. Accepting one by its id still works, because naming an id is a deliberate decision that overrides the earlier one. Accept is idempotent. Running it twice leaves the file as it was after the first run, because the second run finds the fingerprint already matches the accepted value and has nothing to do.
 
 `accept` without arguments does nothing and says so. Replacing existing expectations needs ids or `--all`. `--missing` fills only empty expectations, because creating one does not overwrite a reviewed value. The design first named the bulk flag `--all-mismatches` so that typing it would be deliberate. `--all` is just as explicit, also fills missing values, and is the flag agents reach for. `xpt failures` prints every diff before the footer suggests an accept, so the change is on screen when it is accepted.
 
@@ -205,7 +235,7 @@ Accept is a state machine per observation group: `recorded -> accepted | rejecte
   .gitignore            # "*", written on first use
   runs/<run>/<worker>.jsonl
   latest                # the run id of the newest complete run
-  decisions.jsonl       # accept and reject events
+  decisions.jsonl       # reject decisions, one per line (see Rejection)
 ```
 
 - Each pytest process, controller or xdist worker, appends to its own file. Nothing is shared, so nothing is locked. This follows "separate before serializing shared state."
@@ -289,7 +319,7 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
 - Parametrized cases that fail at the same line with the same kind of error fold into the first case, and `also fails:` lists the rest.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
-- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`, and `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same `Filled` line prints after pytest's summary.
+- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`, and `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same `Filled` line prints after pytest's summary.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
 - Internal errors, `-x` stops, and other plugins' summary lines still print. Exit codes are pytest's. Under xdist the controller prints one report, and worker status lines are dropped.
 - `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`.
@@ -305,15 +335,15 @@ a81f  tests/test_parser.py:14  mismatch  2 tests
 1 failure in run 20260101T120000-ab12 (1 mismatch), 1 acceptable. Next: xpt accept a81f
 ```
 
-There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`.
+There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`. Reject adds `outcomes`. Each group carries `rejected`.
 
-The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `diff`, and their data types, so an MCP server later is another thin wrapper and not a redesign.
+The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `reject`, `load_rejections`, `mark`, `diff`, and their data types, so an MCP server later is another thin wrapper and not a redesign.
 
 ## Concurrency
 
 - xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` runs in the controller's `pytest_sessionfinish`, after every worker has finished.
 - Two pytest sessions at once in one project each get their own run directory. `latest` names whichever finished last. That is acceptable, and `--run <id>` selects another.
-- Accept while pytest runs: accept creates `.xpt/accept.lock` with `O_CREAT | O_EXCL`, which behaves the same on POSIX and Windows, and deletes it when done. A second accept fails with a message naming the lock file. A crash can leave the file behind, so the message says to delete it if no accept is running. A test run racing an accept is caught by the fingerprint check on the next accept.
+- Accept while pytest runs: accept creates `.xpt/accept.lock` with `O_CREAT | O_EXCL`, which behaves the same on POSIX and Windows, and deletes it when done. A second accept fails with a message naming the lock file. A crash can leave the file behind, so the message says to delete it if no accept is running. A test run racing an accept is caught by the fingerprint check on the next accept. `reject` and `clean` take the same lock, so the error says another xpt command is writing to `.xpt/`.
 
 ## Risks
 

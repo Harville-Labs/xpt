@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from _pytest import timing
 
-from xpt import record
+from xpt import decisions, record
 from xpt.accept import AcceptResult
 from xpt.failure import Failure, Text, Where, streams, where_from_json
 from xpt.summary import Session, limits, report_json, report_lines
@@ -145,8 +145,16 @@ class AgentReporter(pytest.TerminalReporter):  # ty: ignore[subclass-of-final-cl
             seconds=self._session_start.elapsed().seconds,
             exit_code=int(session.exitstatus),
             run=run,
+            rejected=self._rejected() if run else frozenset(),
             created=self.config.stash.get(CREATED, None),
         )
+
+    def _rejected(self) -> frozenset[decisions.Rejection]:
+        try:
+            return decisions.load_rejections(record.recorder.root)
+        except record.RecordError as error:
+            self.write_line(f"xpt: {error}")
+            return frozenset()
 
 
 def _failure(rep: Any) -> Failure:

@@ -1,7 +1,8 @@
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
+from xpt.decisions import Rejection, rejection
 from xpt.failure import (
     Compared,
     Detail,
@@ -15,6 +16,7 @@ from xpt.failure import (
     where_from_json,
     where_json,
 )
+from xpt.group import group
 from xpt.record import Observation, Status
 from xpt.site import CallSite
 from xpt.summary import Limits, Session, limits, report_json, report_lines
@@ -36,8 +38,10 @@ def failure(test: str = "t.py::test_a", detail: Detail | None = None, **changes:
     return Failure(**fields)  # type: ignore[arg-type]
 
 
-def session(*failures: Failure, run: str | None = None) -> Session:
-    return Session(failures, ("1 failed",), 0.5, 1, run)
+def session(
+    *failures: Failure, run: str | None = None, rejected: frozenset[Rejection] = frozenset()
+) -> Session:
+    return Session(failures, ("1 failed",), 0.5, 1, run, rejected)
 
 
 ONE = Int(1)
@@ -116,6 +120,19 @@ def test_the_footer_points_at_xpt_failures_when_nothing_is_acceptable():
     unsupported = observed("unsupported", None)
     lines = report_lines(session(failure(detail=Expected(unsupported)), run="r"), QUIET)
     assert lines[-1] == "1 failed in 0.50s. Next: xpt failures"
+
+
+def test_a_rejected_group_is_marked_and_left_out_of_the_footer():
+    failed = failure(detail=Expected(observed()))
+    [g] = group([observed()])
+    found = rejection(g)
+    assert found is not None
+    lines = report_lines(session(failed, run="r", rejected=frozenset([found])), QUIET)
+    assert lines[1] == "  3b78  mismatch  rejected"
+    assert lines[-1] == "1 failed in 0.50s. Next: xpt failures"
+    data = report_json(session(failed, run="r", rejected=frozenset([found])))
+    [entry] = cast(list[dict[str, Any]], data["failures"])
+    assert (entry["group"]["rejected"], data["summary"]) == (True, lines[-1])
 
 
 def test_output_shows_the_last_lines_of_each_stream_and_very_verbose_the_traceback():

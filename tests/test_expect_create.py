@@ -164,4 +164,13 @@ def test_a_held_accept_lock_leaves_the_source_and_suggests_every_accept(
     report = json.loads((project.path / "report.json").read_text(encoding="utf-8"))
     reasons = {o["status"]: o["reason"] for o in report["created"]["outcomes"]}
     assert list(reasons) == ["skipped"]
-    assert "another xpt accept is running" in reasons["skipped"]
+    assert "another xpt command is writing to .xpt/" in reasons["skipped"]
+
+
+def test_a_rejected_missing_value_is_not_filled(project: pytest.Pytester):
+    first = run(project)
+    [id] = [m[1] for line in first.outlines if (m := re.fullmatch(r"  (\w+)  missing", line))][:1]
+    rejected = project.run("xpt", "reject", id)
+    assert rejected.ret == 0, rejected.outlines
+    run(project, "--expect-create").assert_outcomes(failed=3)
+    assert source(project) == FILLED.replace("expect([1, 2], [1, 2])", "expect([1, 2])")

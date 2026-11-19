@@ -7,11 +7,12 @@ from typing import Any
 
 import pytest
 
-from xpt import record, report
+from xpt import decisions, record, report
 from xpt.accept import create
 from xpt.diff import diff
 from xpt.expect import ExpectationFailed
 from xpt.failure import Compared, Detail, Expected, Frame, Raised, Text, Where, where_json
+from xpt.group import Group, group, missing
 from xpt.serialize import UnsupportedValue, serialize
 from xpt.summary import filled_line, limits
 from xpt.terminal import CREATED, AgentReporter, location
@@ -65,6 +66,16 @@ def pytest_configure(config: pytest.Config) -> None:
     config.stash[_COMPARED] = None
     if mode == "xpt" and workerinput is None:
         AgentReporter.install(config, config.getoption("xpt_json"))
+
+
+def _missing(root: Path, run: str) -> list[Group]:
+    if run not in record.run_ids(root):
+        return []
+    try:
+        rejected = decisions.load_rejections(root)
+    except record.RecordError:
+        rejected = frozenset()
+    return missing(decisions.mark(group(record.load_run(root, run)), rejected))
 
 
 def _check_create(config: pytest.Config) -> None:
@@ -201,7 +212,9 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
         return
     record.recorder.finish()
     if config.getoption("expect_create"):
-        config.stash[CREATED] = create(config.rootpath, record.recorder.run)
+        config.stash[CREATED] = create(
+            config.rootpath, _missing(config.rootpath, record.recorder.run)
+        )
 
 
 def pytest_terminal_summary(

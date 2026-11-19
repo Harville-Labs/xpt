@@ -4,13 +4,13 @@ import os
 import secrets
 import shutil
 from collections import defaultdict
-from collections.abc import Generator, Iterable
+from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from xpt.group import Group, group, missing
-from xpt.record import load_run, run_ids, state_directory
+from xpt.group import Group
+from xpt.record import state_directory
 from xpt.rewrite import Outcome, rewrite
 from xpt.site import Unlocatable
 
@@ -53,13 +53,12 @@ def accept(root: Path, groups: Iterable[Group], *, dry_run: bool = False) -> Acc
     return AcceptResult(tuple(outcomes[i] for i in range(len(given))), tuple(changed))
 
 
-def create(root: Path, run: str) -> AcceptResult:
-    """Accept the missing groups of `run`, which `pytest --expect-create` does after the session.
+def create(root: Path, groups: Sequence[Group]) -> AcceptResult:
+    """Accept missing groups the way `pytest --expect-create` does after the session.
 
     A held lock skips every group with the lock's message instead of raising, so the session
     still ends with its report.
     """
-    groups = missing(group(load_run(root, run))) if run in run_ids(root) else []
     if not groups:
         return AcceptResult((), ())
     try:
@@ -116,8 +115,8 @@ def lock(lock: Path) -> Generator[None]:
     except FileExistsError:
         shown = lock.as_posix()
         raise AcceptError(
-            f"{shown} exists, so another xpt accept is running. "
-            f"If none is, delete {shown} and run accept again."
+            f"{shown} exists, so another xpt command is writing to .xpt/. "
+            f"If none is, delete {shown} and run the command again."
         ) from None
     try:
         os.write(fd, str(os.getpid()).encode("ascii"))

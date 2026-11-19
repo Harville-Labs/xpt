@@ -5,6 +5,7 @@ Inline expect tests for Python, built so coding agents can work with them cheapl
 ```python
 from xpt import expect
 
+
 def test_parser():
     expect(parse("x + y"))
 ```

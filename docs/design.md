@@ -231,8 +231,8 @@ JSON is the same data with `"schema_version": 1`. Every CLI command takes `--jso
 ```python
 from xpt import expect
 
-expect(actual)                    # missing: fails, records
-expect(actual, expected)          # compares with ==, records on mismatch
+expect(actual)  # missing: fails, records
+expect(actual, expected)  # compares with ==, records on mismatch
 ```
 
 Later, as keyword-only arguments: `ignore=`, `unordered=`, `atol=`, `rtol=`, `key=`. These stay in the source, so a reviewer can see them.

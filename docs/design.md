@@ -321,7 +321,9 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
 - The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
-- Internal errors, `-x` stops, and other plugins' summary lines still print. Exit codes are pytest's. Under xdist the controller prints one report, and worker status lines are dropped.
+- `-v` and `-vv` also keep pytest's line per test. `-r` with anything but the default `fE` keeps pytest's short summary beside the report, and `-rP`/`-rA` keep its PASSES section. `--no-summary` prints only the footer. `--no-header` and `-q` drop the plugin header lines.
+- Everything else pytest prints still prints: the warnings summary, plugin header lines and terminal summaries, `--durations`, `-x` stops, keyboard interrupts, interrupted collection, `--lf` messages, `--setup-show`, live logs, the debugger, and xdist's worker status lines. Exit codes are pytest's. Under xdist the controller prints one report.
+- `--tb` other than `auto`, `-l`, and `--full-trace` ask for pytest's failure sections, so those runs keep pytest's report. So do runs that don't run tests: `--co`, `--fixtures`, `--fixtures-per-test`, `--markers`, `--setup-only`, `--setup-plan`, `--help`, and `--version`. `--xpt-json` with one of these is a usage error, because there is no xpt report to write.
 - `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, and `failures`. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`. A compared assert's changes name their sides `left` and `right`, as the text does. `op` reads from left to right, so `add` is a value only the right side has.
 
 The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
@@ -338,6 +340,22 @@ a81f  tests/test_parser.py:14  mismatch  2 tests
 There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`. Reject adds `outcomes`. Each group carries `rejected`.
 
 The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `reject`, `load_rejections`, `mark`, `diff`, and their data types, so an MCP server later is another thin wrapper and not a redesign.
+
+### How the report fits into pytest
+
+The report has to work on every pytest a project might pin, and it can't take away anything pytest prints. Three designs were compared on pytest 8.0 through 9.2:
+
+- **A separate reporter of our own**, registered as `terminalreporter` in place of pytest's. pytest's reporter implements about 16 hooks, and the set changes between releases: 8.0 has `pytest_runtest_logfinish`, 9.2 drops it and adds a `pytest_runtestloop` wrapper. Exit messages, `--max-warnings`, `--lf` messages, keyboard interrupts, and the warnings summary all live in those hooks. Plugins also read the reporter's attributes: `_tw` (the debugger), `stats`, `write_sep`, `section`, `write_line`, `rewrite`, `ensure_newline`, `hasmarkup` and `isatty` (xdist), `showfspath`, `startpath`, and `reported_progress`, and `config.get_terminal_writer()` returns `_tw`. A reporter of our own would have to reimplement all of that and follow every release.
+- **A wrapper that delegates to pytest's reporter.** It inherits nothing, so it needs the same list, kept by hand.
+- **pytest's reporter, subclassed in place** (chosen). At configure time xpt changes the registered reporter's class to `AgentReporter`, a subclass, and registers the same object again so pluggy sees the new hooks. Objects that already hold the reporter, such as xdist's `DSession.terminal`, keep it. The subclass overrides only methods pytest names publicly: `summary_failures`, `summary_errors`, `short_test_summary`, `summary_stats`, `report_collect`, `pytest_collection`, the per-test log hooks, `showheader`, and a `pytest_report_teststatus` wrapper that blanks the progress letter while keeping the category, so `stats` stay pytest's. Every other hook and attribute is pytest's own code for that release, so there is no list of pytest's surface to maintain.
+
+The subclass depends only on those method names, which are the same across the tested range. `pytest.TerminalReporter` is public from 8.4, and older releases import it from `_pytest.terminal`. 8.0 is the floor because the report uses `Config.get_verbosity`. On an older pytest the plugin prints pytest's report and a one-line notice.
+
+If the swap raises, xpt puts pytest's class back, registers it again if needed, and prints a notice. If rendering raises, `summary_stats` prints pytest's failure sections, short summary, and final line, then the notice. Neither path changes the exit code. pytest-sugar replaces the reporter with its own class before xpt's `trylast` configure runs, so xpt sees a reporter that isn't pytest's and stands aside.
+
+`tests/test_report_compat.py` holds this to account. It runs a suite with every outcome, a plugin that writes through the reporter, and 32 option sets, once with `--xpt-report=pytest` and once with the xpt report, and asserts equal exit codes, equal stderr, and that every stock line outside the replaced sections also appears in the xpt run. CI runs the whole test suite on each pytest minor release from 8.0 and on the oldest and newest supported pytest-xdist, and the compatibility tests with pytest-sugar installed.
+
+Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, because the report doesn't advance `reported_progress`. Behavior on a real terminal, where pytest rewrites lines, is tested only through the same code paths a pipe uses.
 
 ## Concurrency
 

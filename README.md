@@ -23,6 +23,8 @@ FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
 
 `-v` raises the limits, `-vv` adds the traceback, and `--xpt-json PATH` writes the whole report as JSON. `--xpt-report=pytest`, or `XPT_REPORT=pytest`, keeps pytest's own output.
 
+The report needs pytest 8.0 or later and is tested on every minor release from 8.0 to 9.2, with pytest-xdist 3.5 to 3.8. It replaces only pytest's header, progress, failure sections, default short summary, and final line. Everything else pytest and other plugins print still prints, and the exit code is always pytest's. Options that ask for pytest's own failure output (`--tb` other than `auto`, `-l`, `--full-trace`) and runs that don't run tests (`--co`, `--fixtures`, `--markers`, `--setup-plan`) keep pytest's report. `-r` with anything but the default keeps pytest's short summary beside the xpt report. pytest-sugar, when it is on, keeps its own report. If the xpt report can't install or render, or pytest is older than 8.0, the run prints pytest's report and one line starting with `xpt:` that says why.
+
 A run records what `expect` saw under `.xpt/`. Then:
 
 ```sh

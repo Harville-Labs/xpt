@@ -34,6 +34,14 @@ xpt runs              # recorded runs, newest first
 xpt clean             # delete .xpt/
 ```
 
+`pytest --expect-create` runs the tests, then fills every missing expectation the same way `xpt accept --missing` does. It writes after the session ends, never during it, and never replaces an existing expected value. The footer names what it wrote and suggests `xpt accept` only for what remains:
+
+```
+2 failed in 0.25s. Filled 1 missing expectation: test_demo.py:4. Next: xpt accept 3526
+```
+
+The run still fails, because the filled expectations were empty when their tests ran. Run the tests again to see them pass.
+
 `xpt accept` writes without running the tests again, and refuses if that source changed since the run. Every command takes `--json`. Exit codes are 0 for done or nothing to do, 1 when failures remain or an accept was refused, and 2 for a usage error. `python -m xpt` works too, and `xpt.api` is the same surface for tools.
 
 Status: early development, not released. Read [docs/design.md](docs/design.md) for the design and roadmap, and [docs/research.md](docs/research.md) for how expecttest, inline-snapshot, syrupy, and ApprovalTests compare. Plans are tracked as GitHub issues.

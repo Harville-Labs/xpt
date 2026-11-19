@@ -8,12 +8,13 @@ from typing import Any
 import pytest
 
 from xpt import record, report
+from xpt.accept import create
 from xpt.diff import diff
 from xpt.expect import ExpectationFailed
 from xpt.failure import Compared, Detail, Expected, Frame, Raised, Text, Where, where_json
 from xpt.serialize import UnsupportedValue, serialize
-from xpt.summary import limits
-from xpt.terminal import AgentReporter, location
+from xpt.summary import filled_line, limits
+from xpt.terminal import CREATED, AgentReporter, location
 from xpt.value import Value
 
 MODES = ("xpt", "pytest")
@@ -24,6 +25,12 @@ _OUTSIDE = {"site-packages", "dist-packages"}
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     group = parser.getgroup("xpt")
+    group.addoption(
+        "--expect-create",
+        action="store_true",
+        help="After the session, write each missing expectation's recorded value into the "
+        "test source, as xpt accept --missing does.",
+    )
     group.addoption(
         "--expect-no-record",
         action="store_true",
@@ -46,6 +53,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config) -> None:
+    _check_create(config)
     workerinput = getattr(config, "workerinput", None)
     run = workerinput["xpt_run"] if workerinput else record.new_run_id()
     worker = workerinput["workerid"] if workerinput else "main"
@@ -57,6 +65,15 @@ def pytest_configure(config: pytest.Config) -> None:
     config.stash[_COMPARED] = None
     if mode == "xpt" and workerinput is None:
         AgentReporter.install(config, config.getoption("xpt_json"))
+
+
+def _check_create(config: pytest.Config) -> None:
+    if not config.getoption("expect_create"):
+        return
+    if config.getoption("expect_no_record"):
+        raise pytest.UsageError("--expect-create needs recording. Drop --expect-no-record.")
+    if not record.environment().record:
+        raise pytest.UsageError("--expect-create needs recording. Unset XPT_NO_RECORD.")
 
 
 def _mode(config: pytest.Config) -> str:
@@ -179,5 +196,18 @@ def _name(error: BaseException) -> str:
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
-    if not hasattr(session.config, "workerinput"):
-        record.recorder.finish()
+    config = session.config
+    if hasattr(config, "workerinput"):
+        return
+    record.recorder.finish()
+    if config.getoption("expect_create"):
+        config.stash[CREATED] = create(config.rootpath, record.recorder.run)
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter, config: pytest.Config
+) -> None:
+    created = config.stash.get(CREATED, None)
+    line = None if created is None else filled_line(created)
+    if line and config.stash.get(_MODE, None) == "pytest":
+        terminalreporter.write_line(line)

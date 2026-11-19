@@ -40,6 +40,11 @@ class Group:
         return self.status in ("missing", "mismatch")
 
 
+def missing(groups: Iterable[Group]) -> list[Group]:
+    """The groups whose expected argument is empty."""
+    return [g for g in groups if g.status == "missing"]
+
+
 def group(observations: Iterable[Observation]) -> tuple[Group, ...]:
     """Group a run's observations by call site, in path, line, and ordinal order."""
     located: dict[SiteKey, list[tuple[CallSite, Observation]]] = defaultdict(list)

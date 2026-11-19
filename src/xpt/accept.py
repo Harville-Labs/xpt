@@ -9,8 +9,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from xpt.group import Group
-from xpt.record import state_directory
+from xpt.group import Group, group, missing
+from xpt.record import load_run, run_ids, state_directory
 from xpt.rewrite import Outcome, rewrite
 from xpt.site import Unlocatable
 
@@ -51,6 +51,21 @@ def accept(root: Path, groups: Iterable[Group], *, dry_run: bool = False) -> Acc
             if done.changed:
                 changed.append(path)
     return AcceptResult(tuple(outcomes[i] for i in range(len(given))), tuple(changed))
+
+
+def create(root: Path, run: str) -> AcceptResult:
+    """Accept the missing groups of `run`, which `pytest --expect-create` does after the session.
+
+    A held lock skips every group with the lock's message instead of raising, so the session
+    still ends with its report.
+    """
+    groups = missing(group(load_run(root, run))) if run in run_ids(root) else []
+    if not groups:
+        return AcceptResult((), ())
+    try:
+        return accept(root, groups)
+    except AcceptError as error:
+        return AcceptResult(tuple(Outcome(g, "skipped", str(error)) for g in groups), ())
 
 
 @dataclass(frozen=True, slots=True)

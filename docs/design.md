@@ -59,7 +59,7 @@ Changing either would be a rewrite of its core, not a pull request. We should st
 The brief was a good starting point. These parts of it change.
 
 1. **Recording is on by default. There is no `--expect-record` flag.** The point is to avoid a second test run. If an agent must rerun with `--expect-record` after a plain `pytest` fails, the flag costs the very run we are trying to save. Every run writes its failed and missing observations to `.xpt/`, which is gitignored. `--expect-no-record` turns this off. The cost is a few kilobytes per failing assertion. The privacy cost is no worse than pytest's own failure output, which already prints the same values. `xpt clean` deletes the directory.
-2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks.
+2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept --missing`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks. A mismatch is never accepted by this flag. Under xdist only the controller writes, after every worker has finished. The exit status is still pytest's, so a run that fills expectations fails, because those tests failed when they ran. `--expect-create` with `--expect-no-record` or `XPT_NO_RECORD` is a usage error, because there would be nothing to fill.
 3. **No LibCST.** The prototype in `docs/prototypes/` shows that the standard library is enough. `code.co_positions()` (Python 3.11+) gives the exact span of the running call. `ast` gives the span of each argument. A byte-offset splice replaces only the expected argument, so comments, formatting, and every other line stay untouched. LibCST would add a native wheel and a YAML dependency to rewrite one argument we can already locate exactly. We still parse the result with `compile()` before writing.
 4. **No runtime dependencies.** pytest is optional. `executing` and `asttokens`, which inline-snapshot uses, are not needed on Python 3.11+.
 5. **Python 3.11 is the floor.** 3.10 reached end of life in October 2026, and 3.11 brings `co_positions` and `co_qualname`.
@@ -172,7 +172,8 @@ pytest run
   expect(actual, expected?)
     compare -> pass: nothing written
             -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
-  session end: one block per failure, a one-line footer with the next command, pytest's exit code
+  session end: with --expect-create, accept the run's missing groups (as xpt accept --missing)
+               one block per failure, a one-line footer with the next command, pytest's exit code
 
 xpt failures                every group of the latest run, each with its diff
 xpt show <id>               one group with its function and tests, paths only, with limits
@@ -288,10 +289,10 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
 - Parametrized cases that fail at the same line with the same kind of error fold into the first case, and `also fails:` lists the rest.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
-- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted, or `Next: xpt failures` when none can.
+- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`, and `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same `Filled` line prints after pytest's summary.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
 - Internal errors, `-x` stops, and other plugins' summary lines still print. Exit codes are pytest's. Under xdist the controller prints one report, and worker status lines are dropped.
-- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, and `failures`. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`.
+- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`.
 
 The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
 
@@ -310,7 +311,7 @@ The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, 
 
 ## Concurrency
 
-- xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed.
+- xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` runs in the controller's `pytest_sessionfinish`, after every worker has finished.
 - Two pytest sessions at once in one project each get their own run directory. `latest` names whichever finished last. That is acceptable, and `--run <id>` selects another.
 - Accept while pytest runs: accept creates `.xpt/accept.lock` with `O_CREAT | O_EXCL`, which behaves the same on POSIX and Windows, and deletes it when done. A second accept fails with a message naming the lock file. A crash can leave the file behind, so the message says to delete it if no accept is running. A test run racing an accept is caught by the fingerprint check on the next accept.
 

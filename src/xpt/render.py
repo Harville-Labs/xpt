@@ -133,6 +133,10 @@ def change_json(c: Change) -> dict[str, Json]:
     return data
 
 
+def accept_json(result: AcceptResult) -> dict[str, Json]:
+    return {"outcomes": [outcome_json(o) for o in result.outcomes], "changed": list(result.changed)}
+
+
 def outcome_json(o: Outcome) -> dict[str, Json]:
     return {
         "id": o.group.id,

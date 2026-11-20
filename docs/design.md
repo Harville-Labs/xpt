@@ -189,7 +189,7 @@ pytest run
 xpt failures                every group of the latest run, each with its diff
 xpt show <id>               one group with its function and tests, paths only, with limits
 xpt show <id> --full        no limits, plus both whole values
-xpt accept <id>... [--dry-run] [--force]
+xpt accept <id>... [--dry-run] [--force] [--verify]
 xpt accept --missing        fill every missing expectation, nothing else
 xpt accept --all            every group not rejected; those that cannot be accepted are reported with their reason
 xpt runs                    the recorded runs, newest first
@@ -202,7 +202,7 @@ Every command takes `--json`, and `--root PATH` for a project other than the cur
 Exit codes:
 
 - `0`: the command did what it was asked, or there is nothing to do.
-- `1`: `failures` found failures, or `accept` or `reject` left a requested group stale, skipped, or suspect.
+- `1`: `failures` found failures, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
 - `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record or decision, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
 
 Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. It moves to `rejected` when `xpt reject` records its actual value as a bug.
@@ -227,6 +227,12 @@ A rejection is one line in `.xpt/decisions.jsonl`:
 `xpt failures` marks rejected groups instead of hiding them. The test still fails, and pytest still reports it, so a group missing from `failures` would leave an agent hunting for it. The heading reads `a81f  tests/test_parser.py:14  mismatch  rejected  1 test`, the JSON group carries `"rejected": true`, and the footer counts them (`1 acceptable, 1 rejected`) and leaves them out of `Next: xpt accept`. `acceptable` keeps its meaning, that the status allows a write. `xpt show` says the group was rejected and how to accept it anyway. The pytest report adds `rejected` after the status and leaves the group out of its footer. `accept --all` and `accept --missing` leave rejected groups out of their selection, as `--missing` leaves out mismatches. Accepting one by its id still works, because naming an id is a deliberate decision that overrides the earlier one. Accept is idempotent. Running it twice leaves the file as it was after the first run, because the second run finds the fingerprint already matches the accepted value and has nothing to do.
 
 `accept` without arguments does nothing and says so. Replacing existing expectations needs ids or `--all`. `--missing` fills only empty expectations, because creating one does not overwrite a reviewed value. The design first named the bulk flag `--all-mismatches` so that typing it would be deliberate. `--all` is just as explicit, also fills missing values, and is the flag agents reach for. `xpt failures` prints every diff before the footer suggests an accept, so the change is on screen when it is accepted.
+
+### Verifying an accept
+
+Agents in the benchmark ran the whole suite again after every accept, two to four pytest runs per task. `xpt accept --verify` reruns only the tests whose node ids the run record holds for the groups now `accepted` or `already_accepted`. It runs `sys.executable -m pytest <ids>` from the project root, after the accept lock is released, so the rerun can record. That rerun becomes the latest run, which is what an agent wants to read next. pytest's exit code decides: a nonzero code makes accept exit `1` and prints pytest's output. When nothing was written there is nothing to rerun, and no process starts. `--verify` with `--dry-run` is a usage error, because nothing would be written to verify.
+
+A test that observed the call site may also fail for a reason the accept did not touch. That is still a failure to report, because the agent asked whether its tests pass now.
 
 ### Suspect values
 

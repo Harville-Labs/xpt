@@ -12,6 +12,7 @@ from xpt.report import MAX_CHANGES, MAX_CHARS, changes, show
 from xpt.rewrite import Outcome
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Json, to_json
+from xpt.verify import Rerun
 
 Lines = list[str]
 
@@ -75,7 +76,10 @@ def show_lines(g: Group, full: bool, run_option: str) -> Lines:
     return [*lines, f"{g.id} cannot be accepted. Fix the test and run it again."]
 
 
-def accept_lines(result: AcceptResult, dry_run: bool, run_option: str, target: str) -> Lines:
+def accept_lines(
+    result: AcceptResult, dry_run: bool, run_option: str, target: str, *, verified: bool = False
+) -> Lines:
+    """`verified` leaves out "Next: run the tests.", because --verify just ran them."""
     lines = _outcome_lines(result.outcomes)
     counts = f"({_statuses(o.status for o in result.outcomes)})"
     files = ", ".join(result.changed)
@@ -89,7 +93,30 @@ def accept_lines(result: AcceptResult, dry_run: bool, run_option: str, target: s
     if suspects:
         force = f"xpt accept{run_option} --force {' '.join(suspects)}"
         return [*lines, f"{done} {counts}. Next: fix the code under test, or run {force}."]
+    if verified:
+        return [*lines, f"{done} {counts}."]
     return [*lines, f"{done} {counts}. Next: run the tests."]
+
+
+def rerun_lines(rerun: Rerun) -> Lines:
+    tests = f"the {_count(len(rerun.tests), 'accepted test')}"
+    if rerun.passed is None:
+        return ["Nothing to rerun."]
+    if rerun.passed:
+        return [f"Verified: {tests} {'passes' if len(rerun.tests) == 1 else 'pass'}."]
+    return [
+        *rerun.output.strip("\n").splitlines(),
+        f"Verify failed: pytest exited {rerun.code} on {tests}.",
+    ]
+
+
+def rerun_json(rerun: Rerun) -> dict[str, Json]:
+    return {
+        "tests": list(rerun.tests),
+        "exit_code": rerun.code,
+        "passed": rerun.passed,
+        "output": rerun.output,
+    }
 
 
 def reject_lines(outcomes: Sequence[RejectOutcome]) -> Lines:

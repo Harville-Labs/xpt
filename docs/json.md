@@ -69,7 +69,20 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 }
 ```
 
-An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).` `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
+An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).`
+
+With `--verify`, the accept object also has `verify`:
+
+```json
+"verify": {
+  "tests": ["tests/test_demo.py::test_count"],
+  "exit_code": 0,
+  "passed": true,
+  "output": "1 passed in 0.03s.\n"
+}
+```
+
+`tests` are the pytest node ids that were rerun. `exit_code` is pytest's. When nothing was written, `tests` is empty and `exit_code` and `passed` are null, because pytest did not run. `output` is pytest's combined stdout and stderr. `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
 
 ## Runs
 

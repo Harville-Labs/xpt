@@ -22,6 +22,7 @@ from xpt.record import (
     run_ids,
 )
 from xpt.value import Json
+from xpt.verify import accepted_tests, rerun
 
 
 class UsageError(Exception):
@@ -90,6 +91,10 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
         )
     if chosen > 1:
         raise UsageError("give ids, --missing, or --all, not more than one.")
+    if args.verify and args.dry_run:
+        raise UsageError(
+            "--verify reruns the tests after writing, so it can't be used with --dry-run."
+        )
     run = _load(root, args.run)
     if args.all:
         groups, target = [g for g in run.groups if not g.rejected], "--all"
@@ -105,10 +110,14 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
         return Output(0, [f"Nothing to accept in run {run.id}."], data | empty)
     result = accept(root, groups, dry_run=args.dry_run, force=args.force)
     written = all(o.status in ("accepted", "already_accepted") for o in result.outcomes)
+    lines = render.accept_lines(result, args.dry_run, run.run_option, target, verified=args.verify)
+    data |= render.accept_json(result)
+    if not args.verify:
+        return Output(0 if written else 1, lines, data)
+    checked = rerun(root, accepted_tests(result.outcomes))
+    code = 0 if written and checked.passed is not False else 1
     return Output(
-        0 if written else 1,
-        render.accept_lines(result, args.dry_run, run.run_option, target),
-        data | render.accept_json(result),
+        code, lines + render.rerun_lines(checked), data | {"verify": render.rerun_json(checked)}
     )
 
 
@@ -176,6 +185,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
     sub.add_argument(
         "--force", action="store_true", help="accept values that look broken, such as exceptions"
+    )
+    sub.add_argument(
+        "--verify", action="store_true", help="rerun the tests that observed the accepted sites"
     )
     sub = add("reject", reject, "record actual values as bugs, never to be offered", picked)
     sub.add_argument("ids", nargs="+", metavar="id")

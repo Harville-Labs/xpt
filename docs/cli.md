@@ -38,6 +38,9 @@ Write actual values into the test source.
 | `--missing` | Only empty expectations. |
 | `--dry-run` | Report what would change and write nothing. |
 | `--force` | Also accept values that look broken. See below. |
+| `--verify` | After writing, rerun only the tests that observed the accepted call sites, and report whether they pass. |
+
+`--verify` runs `python -m pytest <node ids>` with the interpreter that runs xpt, from the project root. The node ids come from the run record, so tests that recorded nothing at those call sites are not run. When they pass, xpt prints `Verified: the 2 accepted tests pass.` When they fail, it prints pytest's output and exits `1`. When nothing was written, nothing is rerun. The rerun records a run like any other test run, so it becomes the latest run. `--verify` can't be combined with `--dry-run`.
 
 Accept refuses an actual value that looks like a failure rather than a result, and reports it `suspect` with the path and the rule that matched:
 
@@ -67,7 +70,7 @@ Delete `.xpt/` and every recorded value.
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
-| `1` | `failures` found failures, or `accept` or `reject` left a requested call site stale, skipped, or suspect. |
+| `1` | `failures` found failures, or `accept` or `reject` left a requested call site stale, skipped, or suspect, or the tests that `accept --verify` reran failed. |
 | `2` | A usage error, an unknown id or run, no recorded run, a malformed record, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files

@@ -39,8 +39,10 @@ class Diff:
 _ARRAYS = frozenset({"numpy:array", "torch:tensor"})
 
 
-def diff(expected: Value, actual: Value, tol: Tolerance = EXACT) -> Diff:
-    walk = _Walk(tol)
+def diff(
+    expected: Value, actual: Value, tol: Tolerance = EXACT, *, unordered: bool = False
+) -> Diff:
+    walk = _Walk(tol, unordered)
     walk.compare(expected, actual, ())
     return Diff(tuple(walk.changes), walk.unchanged, tuple(walk.arrays))
 
@@ -82,6 +84,7 @@ def leaves(value: Value) -> int:
 @dataclass(slots=True)
 class _Walk:
     tol: Tolerance
+    unordered: bool = False
     changes: list[Change] = field(default_factory=list)
     unchanged: int = 0
     arrays: list[ArrayCount] = field(default_factory=list)
@@ -91,6 +94,8 @@ class _Walk:
             self.unchanged += leaves(a)
             return
         match e, a:
+            case Seq(ek, ei), Seq(ak, ai) if ek == ak and self.unordered:
+                self._multiset(ei, ai, path)
             case Seq(ek, ei), Seq(ak, ai) if ek == ak:
                 for i, (ev, av) in enumerate(zip(ei, ai, strict=False)):
                     self.compare(ev, av, (*path, Index(i)))
@@ -132,6 +137,27 @@ class _Walk:
                     self.changes.append(Change(field_path(path, name), "add", None, av))
             case _:
                 self.changes.append(Change(path, "replace", e, a))
+
+    def _multiset(self, ei: tuple[Value, ...], ai: tuple[Value, ...], path: Path) -> None:
+        theirs = list(ai)
+        missing: list[Value] = []
+        for v in ei:
+            found = next((i for i, av in enumerate(theirs) if self._same(v, av)), None)
+            if found is None:
+                missing.append(v)
+            else:
+                self.unchanged += leaves(theirs.pop(found))
+        self.changes.extend(Change(path, "remove", v, None) for v in missing)
+        self.changes.extend(Change(path, "add", None, v) for v in theirs)
+
+    def _same(self, e: Value, a: Value) -> bool:
+        if norm(e) == norm(a):
+            return True
+        if not self.tol:
+            return False
+        probe = _Walk(self.tol, self.unordered)
+        probe.compare(e, a, ())
+        return not probe.changes
 
     def _count(self, path: Path, items: Value, changes: list[Change]) -> None:
         if any(c.op != "replace" for c in changes):

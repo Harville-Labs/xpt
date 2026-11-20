@@ -3,6 +3,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,7 +16,7 @@ from xpt.value import Int, Seq, Str
 HERE = Path(__file__).resolve()
 
 
-def fails(*args: object, **kwargs: int) -> str:
+def fails(*args: object, **kwargs: Any) -> str:
     with pytest.raises(AssertionError) as info:
         expect(*args, **kwargs)  # type: ignore[arg-type]
     return str(info.value)

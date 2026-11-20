@@ -264,7 +264,7 @@ def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
             rejected = "  rejected" if g and g.rejected else ""
             lines = [f"  {(g.id if g else None) or '-'}  {g.status if g else o.status}{rejected}"]
             if o.expected is not None and o.actual is not None:
-                return lines + _changes(diff(o.expected, o.actual, o.tolerance), lim)
+                return lines + _changes(o.options.diff(o.expected, o.actual), lim)
             if o.actual is not None:
                 return [*lines, f"  actual: {show(o.actual, lim.width)}"]
             return [*lines, f"  {cut(o.detail, lim.message)}"]

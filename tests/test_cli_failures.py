@@ -8,7 +8,8 @@ from xpt.value import Dict, Int, Null, Str
 
 CONFLICT_DETAIL = (
     "calls disagree on the actual value. tests/test_b.py::test_c[1] got 1. "
-    "tests/test_b.py::test_c[2] got 2. Give each case its own expect()."
+    "tests/test_b.py::test_c[2] got 2. Give each case its own expect(), "
+    "or pass key=case so one dict holds every case."
 )
 LOST_DETAIL = "expect() was called from code with no source file."
 

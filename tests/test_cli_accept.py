@@ -94,7 +94,8 @@ def test_accept_all_writes_every_acceptable_group_and_reports_the_rest(
         f"{ids['test_mismatch']}  test_it.py:8  accepted",
         f"{ids['test_conflict']}  test_it.py:12  skipped",
         "  calls disagree on the actual value. test_it.py::test_conflict[1] got 1. "
-        "test_it.py::test_conflict[2] got 2. Give each case its own expect().",
+        "test_it.py::test_conflict[2] got 2. Give each case its own expect(), "
+        "or pass key=case so one dict holds every case.",
         "Changed test_it.py (2 accepted, 1 skipped). Next: run the tests.",
     ]
     run_tests(pytester).assert_outcomes(passed=2, failed=2)

@@ -6,6 +6,9 @@ from xpt import expect
 expect(actual)  # missing: fails and records actual
 expect(actual, expected)  # passes when actual equals expected, fails with a diff otherwise
 expect(actual, expected, atol=1e-6)  # floats pass when within the tolerance
+expect(actual, expected, ignore=['value["id"]'])  # leave volatile dict entries out
+expect(actual, expected, unordered=True)  # lists compare as multisets
+expect(actual, {1: 2, 2: 4}, key=n)  # one expected value per parametrized case
 ```
 
 `expect` compares `actual` with `expected`. When they differ, or when `expected` is left out, the test fails with `ExpectationFailed` and xpt records the actual value under `.xpt/` so `xpt accept` can write it into the source.
@@ -59,6 +62,40 @@ A call passes when `actual == expected`. Arrays, tensors, and pandas objects are
 ### Tolerances
 
 `atol` and `rtol` let floats differ a little. A float passes when `|actual - expected| <= atol + rtol * |expected|`, both are 0 by default, and both must be finite and 0 or more. The rule applies to every float in the value, to each element of a float array, tensor, or pandas column, and to the real and imaginary parts of a complex number on their own. Integers, integer arrays, strings, and everything else still compare exactly, so `expect(2, 1, atol=5)` fails. An integer next to a float uses the tolerance. An infinity equals only an infinity of the same sign, and `nan` equals `nan`. The failure header names the tolerance, as in `expect() mismatch (atol=0.001):`, and the diff lists only the values outside it. The tolerance is recorded with the run, so `xpt failures`, `xpt show`, and the end-of-session summary show the same diff, and `xpt accept` keeps the keywords in the source.
+
+### Ignoring volatile fields
+
+`ignore` takes a list of paths to dict entries that change from run to run, such as timestamps and generated ids. Each path is written the way a diff prints it, starting at `value`, so you can copy it from a failure:
+
+```python
+expect(create_user(), {"name": "ada"}, ignore=['value["id"]', 'value["created"]'])
+expect(list_rows(), [{"v": 1}, {"v": 2}], ignore=['value[...]["id"]'])
+expect(load(), Config(meta={"host": "a"}), ignore=['value.meta["pid"]'])
+```
+
+`[...]` matches every item of a list or tuple and every value of a dict. A path can pass through a dataclass field with `.name`, and a key can be a string, a number, a bool, or `None`. xpt removes the named entries from both sides before it compares, so the expected value may leave them out, and the value xpt writes when you accept leaves them out too. A path that names nothing in the value is fine; it ignores nothing.
+
+Only dict entries can be ignored. A path that ends at a list item fails and suggests `unordered=True` or a key inside the items. A path that ends at a dataclass or model field fails too, because xpt must write every field to rebuild the object; expect `dataclasses.asdict(value)` or a dict of the fields you care about instead. These errors appear only when the call fails, since a call whose values are already equal returns before the paths are applied. A path xpt can't read, such as one not starting at `value` or one with a tuple key, raises `ValueError` and shows how to write one.
+
+### Unordered lists
+
+`unordered=True` compares every list and tuple in the value as a multiset: order is ignored, and repeated items must match in count. It applies at every depth, but not to the elements of an array, tensor, or pandas object, nor to a digest. Sets and dict keys already ignore order. Within a tolerance, an item matches any item within it. The diff lists unmatched items as `removed` and `added` at the list's path. xpt writes accepted values with every list sorted, so the source stays stable from run to run.
+
+The failure header names every option in force, as in `expect() mismatch (atol=0.001, unordered, ignore=value["id"]):`. `ignore` and `unordered` are recorded with the run like the tolerance, so `xpt failures`, `xpt show`, and the end-of-session summary show the same diff, and `xpt accept` keeps the keywords in the source.
+
+### Parametrized tests
+
+A parametrized test that calls `expect` once runs one call site with many values. Without help, its cases disagree and xpt reports a conflict. Pass `key=` with the case's parameter, and give `expected` as a dict from each key to that case's expected value:
+
+```python
+@pytest.mark.parametrize("n", [1, 2, 3])
+def test_double(n):
+    expect(double(n), {1: 2, 2: 4, 3: 6}, key=n)
+```
+
+Each case compares against its own entry. A mismatch names the case in its path, as in `value[2]: 4 -> 5`, and a key with no entry fails with `expect() has no expected value for key=3`. Start with `expect(double(n), key=n)` and run `pytest --expect-create`; xpt fills the whole dict in one edit. Later, `xpt accept` writes the failing cases into the dict and keeps the passing ones. A new case alone counts as missing, so `--expect-create` adds it without touching the other entries. Entries for cases you delete stay in the dict until you remove them.
+
+The key must be a value xpt can record and use as a dict key, such as a string, a number, or a tuple of them. `ignore` paths and `unordered` apply inside each case's value, so write `'value["id"]'`, not `'value[2]["id"]'`. Two calls with the same key and different values conflict, and so does a call site that mixes calls with and without `key=`.
 
 ### Large arrays
 

@@ -6,15 +6,18 @@ from dataclasses import dataclass
 from typing import Literal, TypeVar
 
 from xpt.diff import norm
+from xpt.keyed import entry, with_entry
+from xpt.options import PLAIN, Options
 from xpt.record import Observation
 from xpt.report import show
 from xpt.site import CallSite, SiteKey, Unlocatable, short_ids
-from xpt.tolerance import EXACT, Tolerance
 from xpt.value import Value, canonical
 
 GroupStatus = Literal["missing", "mismatch", "unsupported", "unlocatable", "conflict"]
 
-ONE_EXPECT_PER_CASE = " Give each case its own expect()."
+ONE_EXPECT_PER_CASE = (
+    " Give each case its own expect(), or pass key=case so one dict holds every case."
+)
 
 T = TypeVar("T")
 
@@ -37,7 +40,7 @@ class Group:
     tests: tuple[str, ...]
     detail: str
     rejected: bool = False
-    tolerance: Tolerance = EXACT
+    options: Options = PLAIN
 
     @property
     def acceptable(self) -> bool:
@@ -50,7 +53,10 @@ class Group:
 
 
 def missing(groups: Iterable[Group]) -> list[Group]:
-    """The groups whose expected argument is empty and whose value was not rejected."""
+    """The groups with no expected value for any failing call, and not rejected.
+
+    A keyed group is missing when only new cases failed, so filling it adds entries.
+    """
     return [g for g in groups if g.status == "missing" and not g.rejected]
 
 
@@ -86,10 +92,15 @@ def _located(id: str, seen: list[tuple[CallSite, Observation]]) -> Group:
     values = tuple(v for v, _ in actuals)
     one_expected = expected[0][0] if len(expected) == 1 else None
 
-    def made(status: GroupStatus, detail: str = "") -> Group:
+    def made(
+        status: GroupStatus,
+        detail: str = "",
+        values: tuple[Value, ...] = values,
+        one_expected: Value | None = one_expected,
+    ) -> Group:
         tests = _tests(observations)
-        tol = observations[0].tolerance
-        return Group(id, site, status, values, one_expected, tests, detail, tolerance=tol)
+        how = observations[0].options
+        return Group(id, site, status, values, one_expected, tests, detail, options=how)
 
     if len(sources) > 1:
         shown = [(f"source {sha[:8]}" if sha else "no expected argument", t) for sha, t in sources]
@@ -102,13 +113,41 @@ def _located(id: str, seen: list[tuple[CallSite, Observation]]) -> Group:
         return made(
             "unsupported", " ".join(sorted({o.detail for o in observations if o.actual is None}))
         )
-    if len(actuals) > 1:
+    is_keyed = any(o.key is not None for o in observations)
+    if len(actuals) > 1 and not is_keyed:
         shown = [(show(v), t) for v, t in actuals]
         return made("conflict", _disagree("the actual value", "got", shown) + ONE_EXPECT_PER_CASE)
     if len(expected) > 1:
         shown = [("no value" if v is None else show(v), t) for v, t in expected]
         return made("conflict", _disagree("the expected value", "had", shown) + ONE_EXPECT_PER_CASE)
+    if is_keyed:
+        return _keyed(made, observations)
     return made(observations[0].status)
+
+
+def _keyed(made: Callable[..., Group], observations: list[Observation]) -> Group:
+    """One group for every case of a keyed call, its actual value the merged dict of cases."""
+    if any(o.key is None for o in observations):
+        tests = _tests(o for o in observations if o.key is None)
+        return made("conflict", f"calls disagree on key=. {', '.join(tests)} passed no key.")
+    cases: dict[Hashable, list[tuple[Value, Observation]]] = defaultdict(list)
+    for o in observations:
+        if (key := o.key) is not None:
+            cases[norm(key)].append((key, o))
+    merged = observations[0].expected
+    for members in cases.values():
+        key = members[0][0]
+        found = _buckets(
+            [(entry(o.actual, key), o) for _, o in members], _same_or_none, _order_or_none
+        )
+        if len(found) > 1:
+            shown = [("no value" if v is None else show(v), t) for v, t in found]
+            what = f"the actual value for key={show(key)}"
+            return made("conflict", _disagree(what, "got", shown) + " Give each case its own key.")
+        if (value := found[0][0]) is not None:
+            merged = with_entry(merged, key, value)
+    status = "missing" if all(o.status == "missing" for o in observations) else "mismatch"
+    return made(status, values=() if merged is None else (merged,))
 
 
 def _unlocatable(site: Unlocatable, observations: list[Observation]) -> Group:

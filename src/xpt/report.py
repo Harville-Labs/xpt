@@ -10,8 +10,9 @@ MAX_CHANGES = 10
 MAX_CHARS = 80
 
 
-def missing(actual: Value) -> str:
-    return f"expect() has no expected value. Actual: {show(actual)}"
+def missing(actual: Value, key: Value | None = None) -> str:
+    case = "" if key is None else f" for key={show(key)}"
+    return f"expect() has no expected value{case}. Actual: {show(actual)}"
 
 
 def mismatch(result: Diff, how: Options = PLAIN) -> str:

@@ -4,7 +4,7 @@ import sys
 from collections.abc import Iterable
 from types import FrameType
 
-from xpt import record, report
+from xpt import keyed, record, report
 from xpt.digest import Digest
 from xpt.equal import equal
 from xpt.extensions import with_extensions
@@ -40,6 +40,7 @@ class Expect:
         rtol: float = 0.0,
         ignore: Iterable[str] = (),
         unordered: bool = False,
+        key: object = _MISSING,
         _depth: int = 0,
     ) -> None:
         """Fail unless `actual == expected`, explaining a mismatch path by path.
@@ -50,30 +51,37 @@ class Expect:
         prints their path, such as `'value["id"]'` or `'value["rows"][...]["id"]'`.
         `unordered=True` compares every list and tuple as a multiset.
 
+        With `key`, `expected` is a dict from each case's key to its expected value, so one
+        call in a parametrized test holds every case: `expect(double(x), {1: 2}, key=x)`.
+
         Leaving out `expected` always fails, so a new expectation never passes unreviewed.
         A failure is recorded under `.xpt/` for review. A helper that calls `expect` passes
         `_depth=1` so the record points at the helper's caller.
         """
         __tracebackhide__ = True
         how = options(atol, rtol, ignore, unordered)
-        if expected is not _MISSING and equal(actual, expected, how.tolerance):
+        want = expected
+        if key is not _MISSING and expected is not _MISSING:
+            want = keyed.check(expected).get(key, _MISSING)
+        if want is not _MISSING and equal(actual, want, how.tolerance):
             return
-        _fail(actual, expected, how, sys._getframe(1 + _depth))
+        _fail(actual, expected, key, how, sys._getframe(1 + _depth))
 
 
 expect = Expect()
 
 
-def _fail(actual: object, expected: object, how: Options, frame: FrameType) -> None:
+def _fail(actual: object, expected: object, key: object, how: Options, frame: FrameType) -> None:
     __tracebackhide__ = True
     rec = record.recorder
+    case: Value | None = None
 
     def observe(
         status: Status, want: Value | None, got: Value | None, detail: str = ""
     ) -> Observation:
         test = rec.test or frame.f_code.co_qualname
         site = locate(frame, rec.root)
-        return Observation(rec.run, test, site, status, want, got, detail, how)
+        return Observation(rec.run, test, site, status, want, got, detail, how, case)
 
     def save(observation: Observation) -> str:
         try:
@@ -83,18 +91,27 @@ def _fail(actual: object, expected: object, how: Options, frame: FrameType) -> N
         return ""
 
     try:
-        want = None if expected is _MISSING else how.prepare(serialize(expected))
         got = how.prepare(serialize(actual))
+        if key is _MISSING:
+            want = stored = None if expected is _MISSING else how.prepare(serialize(expected))
+        else:
+            case = serialize(key)
+            stored = None if expected is _MISSING else keyed.cases(serialize(expected), how)
+            want = keyed.entry(stored, case)
     except UnsupportedValue as error:
         if rec.enabled and (note := save(observe("unsupported", None, None, str(error)))):
             error.add_note(note)
         raise
+    seen = got if case is None else keyed.with_entry(stored, case, got)
     if want is None:
-        status, message = "missing", report.missing(got)
+        status, message = "missing", report.missing(got, case)
     elif not (found := how.diff(want, got)).changes and how.reshapes:
         return
-    else:
+    elif case is None:
         status, message = "mismatch", report.mismatch(found, how)
-    observation = observe(status, want, got)
+    else:
+        one = how.diff(keyed.with_entry(None, case, want), keyed.with_entry(None, case, got))
+        status, message = "mismatch", report.mismatch(one, how)
+    observation = observe(status, stored, seen)
     note = save(observation)
     raise ExpectationFailed(f"{message}\n{note}" if note else message, observation)

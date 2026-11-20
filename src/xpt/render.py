@@ -17,7 +17,7 @@ Lines = list[str]
 
 
 def group_diff(g: Group) -> Diff | None:
-    if g.status != "mismatch" or g.expected is None or len(g.actuals) != 1:
+    if not g.acceptable or g.expected is None or len(g.actuals) != 1:
         return None
     return g.options.diff(g.expected, g.actuals[0])
 

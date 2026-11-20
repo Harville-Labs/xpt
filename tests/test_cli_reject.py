@@ -88,7 +88,8 @@ def test_a_group_without_one_actual_value_is_skipped_and_exits_one(
     assert ran.out.splitlines() == [
         "c9cc  tests/test_b.py:3  skipped",
         "  calls disagree on the actual value. tests/test_b.py::test_c[1] got 1. "
-        "tests/test_b.py::test_c[2] got 2. Give each case its own expect().",
+        "tests/test_b.py::test_c[2] got 2. Give each case its own expect(), "
+        "or pass key=case so one dict holds every case.",
         "df55  tests/test_a.py:7  rejected",
         "Recorded 1 rejection in .xpt/decisions.jsonl (1 skipped, 1 rejected). "
         "Next: fix the code under test, then run the tests.",

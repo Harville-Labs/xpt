@@ -40,6 +40,7 @@ class Observation:
     actual: Value | None
     detail: str
     options: Options = PLAIN
+    key: Value | None = None
 
 
 class RecordError(ValueError):
@@ -215,6 +216,8 @@ def to_record(o: Observation) -> dict[str, object]:
     if o.actual is not None:
         record["actual"] = to_json(o.actual)
     record.update(o.options.fields())
+    if o.key is not None:
+        record["key"] = to_json(o.key)
     return record
 
 
@@ -237,7 +240,7 @@ def _without_values(o: Observation, size: int) -> Observation:
     text = canonical(value) if value is not None else ""
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     detail = f"too large: {size} bytes, sha256 {digest}"
-    return Observation(o.run, o.test, o.site, o.status, None, None, detail, o.options)
+    return Observation(o.run, o.test, o.site, o.status, None, None, detail, o.options, o.key)
 
 
 def versioned(data: object) -> dict[str, object]:
@@ -263,6 +266,7 @@ def from_record(data: object) -> Observation:
         actual=_value(record, "actual"),
         detail=json_str(record, "detail"),
         options=_options(record),
+        key=_value(record, "key"),
     )
 
 

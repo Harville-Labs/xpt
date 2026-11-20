@@ -60,7 +60,7 @@ def test_differing_actuals_are_a_conflict_that_names_the_tests_behind_each_value
     assert (g.status, g.actuals, g.acceptable) == ("conflict", (Int(2), Int(3)), False)
     assert g.detail == (
         "calls disagree on the actual value. t.py::t[1] got 2. t.py::t[2] got 3. "
-        "Give each case its own expect()."
+        "Give each case its own expect(), or pass key=case so one dict holds every case."
     )
 
 
@@ -82,7 +82,7 @@ def test_equal_actuals_against_different_expected_values_are_a_conflict():
     assert (g.status, g.expected) == ("conflict", None)
     assert g.detail == (
         "calls disagree on the expected value. t.py::a had 1. t.py::b had 5. "
-        "Give each case its own expect()."
+        "Give each case its own expect(), or pass key=case so one dict holds every case."
     )
 
 

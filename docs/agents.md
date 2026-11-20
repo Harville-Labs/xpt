@@ -17,7 +17,7 @@ This project uses xpt inline expect tests (https://harville-labs.github.io/xpt/)
 
 - Write new expectations as `expect(value)` with no expected argument, run `pytest --expect-create`, then read the filled value in the diff before committing it.
 - When a test fails, read the diff in the pytest output or `xpt failures`. Decide whether the new value is correct.
-  - Correct, because the code's behavior was meant to change: `xpt accept <id>`.
+  - Correct, because the code's behavior was meant to change: run the `accept:` command printed under its diff, `xpt accept <id>`. To accept while running the tests, use `pytest --expect-accept=<id>`.
   - A bug: fix the code. If you can't fix it now, run `xpt reject <id>` so it isn't accepted by accident.
 - Never run `xpt accept --all` without reading every diff `xpt failures` prints first.
 - Don't hand-edit an expected value that xpt can write. Accept it, so the value is exactly what the code returned.
@@ -31,7 +31,9 @@ This project uses xpt inline expect tests (https://harville-labs.github.io/xpt/)
 |---|---|
 | `Next: xpt accept b211 ee17` | These call sites can be accepted. Read their diffs first. |
 | `Next: xpt failures` | There are expect failures, but none can be accepted. `xpt failures` says why. |
-| `Next: run the tests.` | `--expect-create` filled every missing expectation. |
+| `Next: run the tests.` | `--expect-create` or `--expect-accept` wrote every failing expectation. |
+| `Accepted 1 expectation: tests/test_demo.py:18.` | `--expect-accept` wrote these call sites after the run. |
+| `Not accepted: b211 stale, zzzz unknown.` | `--expect-accept` could not write these. The lines above the footer say why. |
 | no `Next:` | Every failure is a plain assert or exception. Fix the code. |
 
 ## LLM-readable docs

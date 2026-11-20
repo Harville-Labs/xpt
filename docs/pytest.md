@@ -8,6 +8,7 @@ FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
   a81f  mismatch
   value.operator: "addition" -> "subtraction"
   1 changed, 42 unchanged
+  accept: xpt accept a81f
 FAILED tests/test_api.py::test_totals  tests/test_api.py:30
   > assert totals(order) == {"total": 42, "items": 3, "tax": 0, "due": 42}
   value["total"]: left 41, right 42
@@ -23,14 +24,16 @@ FAILED tests/test_io.py::test_load  tests/test_io.py:8 > src/app/io.py:12 read_c
 
 - The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. When the error comes from a helper, it shows the chain of project frames from the test down.
 - The next line is the source line at that frame, after `> `.
-- An `expect` failure shows its id, its status, and the diff by path.
+- An `expect` failure shows its id, its status, and the diff by path. When the call site can be accepted, the block ends with the command that accepts it, `accept: xpt accept <id>`.
 - A plain `assert left == right` on values xpt can record gets the same diff, labeled `left` and `right`.
 - Any other exception is one line, `Type: message`, cut to 200 characters, plus a `caused by:` line for a chained exception.
 - Parametrized cases that fail the same way fold into one block with an `also fails:` line per other case.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
 - Setup and teardown errors say `ERROR` and name the phase.
 
-The footer is pytest's counts and duration, then the next command: `Next: xpt accept <ids>` when there are call sites to accept, `Next: xpt failures` when there are expect failures but none can be accepted.
+The footer is pytest's counts and duration, then what `--expect-create` and `--expect-accept` wrote, then the next command: `Next: xpt accept <ids>` when there are call sites to accept, `Next: xpt failures` when there are expect failures but none can be accepted.
+
+The `accept:` line accepts one call site, the one whose diff is right above it. The footer's `Next:` accepts every call site that can be accepted. A call site that is rejected, in conflict, or already accepted by this run has no `accept:` line.
 
 ## Verbosity
 
@@ -47,6 +50,7 @@ The footer is pytest's counts and duration, then the next command: `Next: xpt ac
 | Option | Environment | Effect |
 |---|---|---|
 | `--expect-create` | | After the session, fill every missing expectation. See [Reviewing failures](review.md#pytest-expect-create). |
+| `--expect-accept=ID[,ID...]` | | After the session, accept these call sites. Repeatable. See [Reviewing failures](review.md#pytest-expect-accept). |
 | `--expect-no-record` | `XPT_NO_RECORD=1` | Don't record failing `expect` calls under `.xpt/`. |
 | `--xpt-report=pytest` | `XPT_REPORT=pytest` | Keep pytest's own output. The default is `xpt`. |
 | `--xpt-json=PATH` | | Also write the full report, with no limits, as [JSON](json.md#pytest-xpt-json). |

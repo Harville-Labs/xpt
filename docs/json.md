@@ -94,6 +94,7 @@ An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `ski
   "duration": 0.04,
   "run": "20261119T150800-b910",
   "created": null,
+  "accepted": null,
   "failures": [
     {
       "test": "tests/test_demo.py::test_count",
@@ -115,5 +116,6 @@ An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `ski
 
 - Nothing is truncated. The JSON has every change and the full traceback.
 - `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`.
+- `accepted` is null without `--expect-accept`. With it, `accepted` holds `outcomes` and `changed` in the same form, plus `unknown`, the named ids that matched no failure in the run.
 - An expect failure adds `group` in the same form as `xpt failures --json`.
 - A compared `assert` adds `changes` and `unchanged`, with sides named `left` and `right`.

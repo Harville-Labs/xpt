@@ -86,6 +86,21 @@ A rejection stops matching as soon as a run records a different value at that ca
 
 Runs the tests, then fills every missing expectation the way `xpt accept --missing` does. It writes after the session ends, never during it, and never replaces an existing expected value. The run still fails, because the expectations were empty when their tests ran. Run again to see them pass.
 
+## `pytest --expect-accept`
+
+Runs the tests, then accepts the named call sites the way `xpt accept <id>` does. Use it when you already know the ids, or to accept and see the report in one command.
+
+```sh
+pytest --expect-accept=b211,ee17
+pytest --expect-accept=b211 --expect-accept=ee17
+```
+
+Like `--expect-create`, it writes after the session ends, so the run still fails for those tests. The footer names what was written, `Accepted 2 expectations: tests/test_demo.py:18 tests/test_demo.py:22.`, and what was not, `Not accepted: b211 stale.` with the reason on the lines above it. An id that names no failure in this run is reported as `unknown`. The other ids are still accepted.
+
+Ids come from the report, where each acceptable failure ends with `accept: xpt accept <id>`. An id is stable across runs, so an id from the last run works. With `--expect-create` as well, the named call sites are accepted and the other missing expectations are filled.
+
+Both options need the run to be recorded, so they are usage errors with `--expect-no-record` or `XPT_NO_RECORD`.
+
 ## Other commands
 
 - `xpt runs` lists the recorded runs, newest first. xpt keeps the last five.

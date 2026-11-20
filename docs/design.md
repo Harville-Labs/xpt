@@ -59,7 +59,7 @@ Changing either would be a rewrite of its core, not a pull request. We should st
 The brief was a good starting point. These parts of it change.
 
 1. **Recording is on by default. There is no `--expect-record` flag.** The point is to avoid a second test run. If an agent must rerun with `--expect-record` after a plain `pytest` fails, the flag costs the very run we are trying to save. Every run writes its failed and missing observations to `.xpt/`, which is gitignored. `--expect-no-record` turns this off. The cost is a few kilobytes per failing assertion. The privacy cost is no worse than pytest's own failure output, which already prints the same values. `xpt clean` deletes the directory.
-2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept --missing`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks. A mismatch is never accepted by this flag. Under xdist only the controller writes, after every worker has finished. The exit status is still pytest's, so a run that fills expectations fails, because those tests failed when they ran. `--expect-create` with `--expect-no-record` or `XPT_NO_RECORD` is a usage error, because there would be nothing to fill.
+2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept --missing`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks. A mismatch is never accepted by this flag. Under xdist only the controller writes, after every worker has finished. The exit status is still pytest's, so a run that fills expectations fails, because those tests failed when they ran. `--expect-create` with `--expect-no-record` or `XPT_NO_RECORD` is a usage error, because there would be nothing to fill. `pytest --expect-accept=ID[,ID...]` follows the same rule for named call sites, through the same path as `xpt accept <id>`. It exists because agents that read only pytest output had to learn a second tool before they could accept, and some read `xpt --help` first. An id that names no group in the run is reported as `unknown` and the others are still written, so one stale id does not block the rest. A named id that was rejected is still accepted, as on the CLI.
 3. **No LibCST.** The prototype in `docs/prototypes/` shows that the standard library is enough. `code.co_positions()` (Python 3.11+) gives the exact span of the running call. `ast` gives the span of each argument. A byte-offset splice replaces only the expected argument, so comments, formatting, and every other line stay untouched. LibCST would add a native wheel and a YAML dependency to rewrite one argument we can already locate exactly. We still parse the result with `compile()` before writing.
 4. **No runtime dependencies.** pytest is optional. `executing` and `asttokens`, which inline-snapshot uses, are not needed on Python 3.11+.
 5. **Python 3.11 is the floor.** 3.10 reached end of life in October 2026, and 3.11 brings `co_positions` and `co_qualname`.
@@ -183,7 +183,8 @@ pytest run
   expect(actual, expected?)
     compare -> pass: nothing written
             -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
-  session end: with --expect-create, accept the run's missing groups (as xpt accept --missing)
+  session end: with --expect-accept, accept the named groups (as xpt accept <id>)
+               with --expect-create, accept the run's other missing groups (as xpt accept --missing)
                one block per failure, a one-line footer with the next command, pytest's exit code
 
 xpt failures                every group of the latest run, each with its diff
@@ -316,6 +317,7 @@ FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
   a81f  mismatch
   value.operator: "addition" -> "subtraction"
   1 changed, 42 unchanged
+  accept: xpt accept a81f
 FAILED tests/test_api.py::test_totals  tests/test_api.py:30
   > assert totals(order) == {"total": 42, "items": 3, "tax": 0, "due": 42}
   value["total"]: left 41, right 42
@@ -334,17 +336,17 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 ```
 
 - Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. When the error is raised in a helper, the header shows the chain of project frames from the test down instead, as `path:line > path:line function`, keeping the first frame and the three nearest the error. The test's own name is left out because the node id has it. The next line is the source line at the deepest frame, after `> `. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
-- An `expect()` failure shows its short id, its status, and the path diff.
+- An `expect()` failure shows its short id, its status, and the path diff. A group that is offered, recorded, and not written by this session ends with `accept: xpt accept <id>`. The footer already names every id, but an agent reading one block should not have to match ids against the footer to act on the diff it just read. The line and the footer's `Next:` come from the same set of pending groups, so they cannot disagree. Rejected, conflicting, and just-accepted groups get no line.
 - A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars, unsupported values, and other operators keep pytest's explanation.
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
 - Parametrized cases that fail at the same line with the same kind of error fold into the first case. Each other case gets an `also fails:` line with its full node id, which can be pasted into a pytest command, and the first detail line where it differs from the first case, without the shared exception type. The default limit of 10 applies, and the rest are counted.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
-- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`, and `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same `Filled` line prints after pytest's summary.
+- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`. With `--expect-accept`, it says `Accepted N expectations: path:line ...` and `Not accepted: <id> <status>, ...` for named ids that were stale, skipped, or unknown, and the lines just above the footer give each reason. `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same lines print after pytest's summary.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
 - `-v` and `-vv` also keep pytest's line per test. `-r` with anything but the default `fE` keeps pytest's short summary beside the report, and `-rP`/`-rA` keep its PASSES section. `--no-summary` prints only the footer. `--no-header` and `-q` drop the plugin header lines.
 - Everything else pytest prints still prints: the warnings summary, plugin header lines and terminal summaries, `--durations`, `-x` stops, keyboard interrupts, interrupted collection, `--lf` messages, `--setup-show`, live logs, the debugger, and xdist's worker status lines. Exit codes are pytest's. Under xdist the controller prints one report.
 - `--tb` other than `auto`, `-l`, and `--full-trace` ask for pytest's failure sections, so those runs keep pytest's report. So do runs that don't run tests: `--co`, `--fixtures`, `--fixtures-per-test`, `--markers`, `--setup-only`, `--setup-plan`, `--help`, and `--version`. `--xpt-json` with one of these is a usage error, because there is no xpt report to write.
-- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`. A compared assert's changes name their sides `left` and `right`, as the text does. `op` reads from left to right, so `add` is a value only the right side has.
+- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, `accepted`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. `accepted` is the same for `--expect-accept`, plus `unknown`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`. A compared assert's changes name their sides `left` and `right`, as the text does. `op` reads from left to right, so `add` is a value only the right side has.
 
 The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
 
@@ -379,7 +381,7 @@ Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, becaus
 
 ## Concurrency
 
-- xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` runs in the controller's `pytest_sessionfinish`, after every worker has finished.
+- xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` and `--expect-accept` run in the controller's `pytest_sessionfinish`, after every worker has finished.
 - Two pytest sessions at once in one project each get their own run directory. `latest` names whichever finished last. That is acceptable, and `--run <id>` selects another.
 - Accept while pytest runs: accept creates `.xpt/accept.lock` with `O_CREAT | O_EXCL`, which behaves the same on POSIX and Windows, and deletes it when done. A second accept fails with a message naming the lock file. A crash can leave the file behind, so the message says to delete it if no accept is running. A test run racing an accept is caught by the fingerprint check on the next accept. `reject` and `clean` take the same lock, so the error says another xpt command is writing to `.xpt/`.
 
@@ -405,7 +407,7 @@ expect(actual, expected)  # compares with ==, records on mismatch
 
 Later, as keyword-only arguments: `ignore=`, `unordered=`, `key=`. These stay in the source, so a reviewer can see them.
 
-pytest plugin options: `--expect-create`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 

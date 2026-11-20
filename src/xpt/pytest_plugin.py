@@ -8,14 +8,14 @@ from typing import Any
 import pytest
 
 from xpt import decisions, record, report
-from xpt.accept import create
+from xpt.accept import Accepted, after_session
 from xpt.diff import diff
 from xpt.expect import ExpectationFailed
 from xpt.failure import Compared, Detail, Expected, Frame, Raised, Text, Where, where_json
-from xpt.group import Group, group, missing
+from xpt.group import Group, group, missing, pick
 from xpt.serialize import UnsupportedValue, serialize
-from xpt.summary import filled_line, limits
-from xpt.terminal import CREATED, AgentReporter, location, stock_reason
+from xpt.summary import after_lines, limits
+from xpt.terminal import ACCEPTED, CREATED, AgentReporter, location, stock_reason
 from xpt.value import Value
 
 MODES = ("xpt", "pytest")
@@ -31,6 +31,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         help="After the session, write each missing expectation's recorded value into the "
         "test source, as xpt accept --missing does.",
+    )
+    group.addoption(
+        "--expect-accept",
+        action="append",
+        metavar="ID[,ID...]",
+        help="After the session, write the actual values of these call sites into the test "
+        "source, as xpt accept ID does. Repeat it or separate ids with commas.",
     )
     group.addoption(
         "--expect-no-record",
@@ -54,7 +61,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config) -> None:
-    _check_create(config)
+    _check_writes(config)
     workerinput = getattr(config, "workerinput", None)
     run = workerinput["xpt_run"] if workerinput else record.new_run_id()
     worker = workerinput["workerid"] if workerinput else "main"
@@ -73,23 +80,34 @@ def pytest_configure(config: pytest.Config) -> None:
         raise pytest.UsageError(f"--xpt-json needs the xpt report, but {reason}.")
 
 
-def _missing(root: Path, run: str) -> list[Group]:
+def _groups(root: Path, run: str) -> tuple[Group, ...]:
     if run not in record.run_ids(root):
-        return []
+        return ()
     try:
         rejected = decisions.load_rejections(root)
     except record.RecordError:
         rejected = frozenset()
-    return missing(decisions.mark(group(record.load_run(root, run)), rejected))
+    return decisions.mark(group(record.load_run(root, run)), rejected)
 
 
-def _check_create(config: pytest.Config) -> None:
-    if not config.getoption("expect_create"):
-        return
-    if config.getoption("expect_no_record"):
-        raise pytest.UsageError("--expect-create needs recording. Drop --expect-no-record.")
-    if not record.environment().record:
-        raise pytest.UsageError("--expect-create needs recording. Unset XPT_NO_RECORD.")
+def _accept_ids(config: pytest.Config) -> tuple[str, ...]:
+    given = config.getoption("expect_accept") or []
+    return tuple(i for value in given for part in value.split(",") if (i := part.strip()))
+
+
+def _check_writes(config: pytest.Config) -> None:
+    accepting = config.getoption("expect_accept") is not None
+    if accepting and not _accept_ids(config):
+        raise pytest.UsageError(
+            "--expect-accept needs call site ids, as in --expect-accept=b211,ee17. "
+            "The report prints each id beside its diff."
+        )
+    asked = {"--expect-create": config.getoption("expect_create"), "--expect-accept": accepting}
+    for flag in (f for f, on in asked.items() if on):
+        if config.getoption("expect_no_record"):
+            raise pytest.UsageError(f"{flag} needs recording. Drop --expect-no-record.")
+        if not record.environment().record:
+            raise pytest.UsageError(f"{flag} needs recording. Unset XPT_NO_RECORD.")
 
 
 def _mode(config: pytest.Config) -> str:
@@ -216,16 +234,26 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     if hasattr(config, "workerinput"):
         return
     record.recorder.finish()
-    if config.getoption("expect_create"):
-        config.stash[CREATED] = create(
-            config.rootpath, _missing(config.rootpath, record.recorder.run)
-        )
+    ids = _accept_ids(config)
+    create = config.getoption("expect_create")
+    if not ids and not create:
+        return
+    root = config.rootpath
+    groups = _groups(root, record.recorder.run)
+    if ids:
+        chosen, unknown = pick(groups, ids)
+        config.stash[ACCEPTED] = Accepted(after_session(root, chosen), unknown)
+    if create:
+        unnamed = [g for g in missing(groups) if g.id not in ids]
+        config.stash[CREATED] = after_session(root, unnamed)
 
 
 def pytest_terminal_summary(
     terminalreporter: pytest.TerminalReporter, config: pytest.Config
 ) -> None:
+    if isinstance(terminalreporter, AgentReporter):
+        return
     created = config.stash.get(CREATED, None)
-    line = None if created is None else filled_line(created)
-    if line and not isinstance(terminalreporter, AgentReporter):
+    accepted = config.stash.get(ACCEPTED, None)
+    for line in after_lines(created, accepted):
         terminalreporter.write_line(line)

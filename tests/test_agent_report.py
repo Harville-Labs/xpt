@@ -50,11 +50,13 @@ MIXED_REPORT = [
     '  > expect({"user": "ada"})',
     "  8db2  missing",
     '  actual: {"user": "ada"}',
+    "  accept: xpt accept 8db2",
     "FAILED test_mixed.py::test_expect_mismatch  test_mixed.py:16",
     '  > expect({"user": "ada", "age": 36}, {"user": "ada", "age": 37})',
     "  b4e4  mismatch",
     '  value["age"]: 37 -> 36',
     "  1 changed, 1 unchanged",
+    "  accept: xpt accept b4e4",
     "FAILED test_mixed.py::test_assert_dict  test_mixed.py:20",
     '  > assert {"a": 1, "b": [1, 2, 3]} == {"a": 1, "b": [1, 2, 4]}',
     '  value["b"][2]: left 3, right 4',
@@ -335,6 +337,7 @@ def test_ok():
         "summary": data["summary"],
         "counts": ["1 failed", "1 passed"],
         "created": None,
+        "accepted": None,
     }
     assert DURATION.sub(" in 0.00s", data["summary"]) == (
         "1 failed, 1 passed in 0.00s. Next: xpt accept " + failure["group"]["id"]
@@ -373,11 +376,13 @@ def test_b():
 
 def test_a_rejected_group_is_marked_and_the_footer_stops_offering_it(pytester: pytest.Pytester):
     first = lines(run(pytester, test_rejectable=REJECTABLE))
-    a, b = first[2].split()[0], first[7].split()[0]
+    a, b = first[2].split()[0], first[8].split()[0]
     assert first[-1] == f"2 failed in 0.00s. Next: xpt accept {' '.join(sorted([a, b]))}"
     assert main(["reject", a, "--root", str(pytester.path)]) == 0
     second = lines(run(pytester, test_rejectable=REJECTABLE))
     assert second[2] == f"  {a}  mismatch  rejected"
+    assert f"  accept: xpt accept {a}" not in second
+    assert f"  accept: xpt accept {b}" in second
     assert second[-1] == f"2 failed in 0.00s. Next: xpt accept {b}"
 
 

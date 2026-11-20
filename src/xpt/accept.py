@@ -62,8 +62,17 @@ def accept(
     return AcceptResult(tuple(outcomes[i] for i in range(len(given))), tuple(changed))
 
 
-def create(root: Path, groups: Sequence[Group]) -> AcceptResult:
-    """Accept missing groups the way `pytest --expect-create` does after the session.
+@dataclass(frozen=True, slots=True)
+class Accepted:
+    """What `pytest --expect-accept` did after the session: the result for the named groups
+    the run had, and the named ids it had no group for."""
+
+    result: AcceptResult
+    unknown: tuple[str, ...]
+
+
+def after_session(root: Path, groups: Sequence[Group]) -> AcceptResult:
+    """Accept groups the way `pytest --expect-create` and `--expect-accept` do after the session.
 
     A held lock skips every group with the lock's message instead of raising, so the session
     still ends with its report.

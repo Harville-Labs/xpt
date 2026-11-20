@@ -84,6 +84,40 @@ With `--verify`, the accept object also has `verify`:
 
 `tests` are the pytest node ids that were rerun. `exit_code` is pytest's. When nothing was written, `tests` is empty and `exit_code` and `passed` are null, because pytest did not run. `output` is pytest's combined stdout and stderr. `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
 
+## Init
+
+```json
+{
+  "schema_version": 1,
+  "command": "init",
+  "dry_run": false,
+  "path": "AGENTS.md",
+  "status": "created",
+  "note": "",
+  "checks": [
+    {"name": "pytest", "ok": true, "detail": "pytest 9.0.1 in /project/.venv/bin/python"},
+    {"name": "plugin", "ok": true, "detail": "pytest loads xpt's plugin. Configuration: pyproject.toml."}
+  ]
+}
+```
+
+`status` is `created`, `added`, `present`, or `kept`. `note` says why a `kept` block was left alone, and is empty otherwise.
+
+## Convert
+
+```json
+{
+  "schema_version": 1,
+  "command": "convert",
+  "dry_run": false,
+  "converted": [{"path": "tests/test_demo.py", "line": 4}],
+  "skipped": [{"path": "tests/test_demo.py", "line": 9, "reason": "neither side is a literal."}],
+  "changed": ["tests/test_demo.py"]
+}
+```
+
+A skip's `line` is `null` when the whole file was skipped.
+
 ## Runs
 
 ```json

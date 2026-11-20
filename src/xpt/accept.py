@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import os
-import secrets
-import shutil
 from collections import defaultdict
 from collections.abc import Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from xpt.atomic import replace
 from xpt.group import Group
 from xpt.record import state_directory
 from xpt.rewrite import Outcome, rewrite
@@ -110,23 +109,10 @@ def _accept_file(root: Path, path: str, groups: list[Group], dry_run: bool) -> _
     if dry_run:
         return _FileResult(planned.outcomes, True)
     try:
-        _replace(file, planned.data)
+        replace(file, planned.data)
     except OSError as error:
         return skipped(f"{path} could not be written: {error.strerror}. It was left unchanged.")
     return _FileResult(planned.outcomes, True)
-
-
-def _replace(file: Path, data: bytes) -> None:
-    temp = file.with_name(f".{file.name}.{secrets.token_hex(4)}.tmp")
-    try:
-        temp.write_bytes(data)
-        shutil.copymode(file, temp)
-        os.replace(temp, file)
-    finally:
-        temp.unlink(missing_ok=True)
-    # A same-size edit in the same second passes CPython's and pytest's mtime-and-size pyc check.
-    for cached in (file.parent / "__pycache__").glob(f"{file.stem}.*.pyc"):
-        cached.unlink(missing_ok=True)
 
 
 @contextmanager

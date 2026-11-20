@@ -10,6 +10,8 @@ The risk with any snapshot tool is an agent that accepts a wrong value to make a
 
 ## Paste into AGENTS.md
 
+`xpt init` writes this block into `AGENTS.md` between `<!-- xpt:begin -->` and `<!-- xpt:end -->` markers and checks that pytest loads xpt's plugin. Running it again changes nothing. To paste it by hand instead:
+
 ```markdown
 ## Tests with xpt
 
@@ -25,6 +27,12 @@ This project uses xpt inline expect tests (https://harville-labs.github.io/xpt/)
 - `xpt show <id> --full` prints whole values when the diff is cut.
 - Use `--json` on any xpt command when parsing its output.
 ```
+
+xpt's tests check that this block and the text `xpt init` writes are the same.
+
+## Moving existing tests to xpt
+
+`xpt convert tests` rewrites `assert value == literal` as `expect(value, literal)`, so later changes show as a diff an agent can accept. It skips asserts it can't convert without changing their meaning, such as float literals or asserts with a message, and lists each with its line and reason. Run it with `--dry-run` first.
 
 ## Reading the footer
 

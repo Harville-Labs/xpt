@@ -1,4 +1,5 @@
 import argparse
+import os
 import shutil
 import sys
 from datetime import UTC, datetime
@@ -19,6 +20,10 @@ from xpt_bench.runs import load_runs
 from xpt_bench.taskcheck import check_task
 
 RESULTS_DIR = BENCH_ROOT / "results"
+
+
+def codex_source() -> Path:
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -54,6 +59,9 @@ def _run(args: argparse.Namespace) -> int:
             words=words,
             timeout=args.timeout,
             keep=args.keep_workdirs,
+            codex_home=workspace.codex_home(root, codex_source())
+            if any(a.kind == "codex" for a in agents)
+            else None,
         )
         print(f"{len(jobs)} runs, {args.jobs} at a time. Results: {out}")
         runs = sweep(jobs, settings, args.jobs)
@@ -79,7 +87,8 @@ def _report(args: argparse.Namespace) -> int:
 def _judge(args: argparse.Namespace) -> int:
     runs = load_runs(args.results)
     tasks = {t.name: t for t in load_tasks("all")}
-    rows = judge(args.results, runs, tasks, RUBRIC_FILE.read_text(), args.model, args.seed)
+    rubric = RUBRIC_FILE.read_text()
+    rows = judge(args.results, runs, tasks, rubric, args.model, args.seed, codex_source())
     print(f"Scored {len(rows)} runs. Scores: {args.results / report.JUDGE_FILE}")
     return 0
 

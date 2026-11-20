@@ -45,7 +45,7 @@ uv run --project bench xpt-bench check     # each task's seed fails and its solu
 Each run gets a fresh directory with a random name under the system temp dir, holding only the task's project, a `git init` with one commit, and a synced `.venv` with the xpt wheel installed. Nothing it can read names the variant, the model, or the purpose of the run: `run` refuses to start if a prompt or the work path contains a variant name, a model name, or a word such as bench, eval, judge, or oracle. The hidden checks are copied in only after the agent exits.
 
 - Claude runs as `claude -p <prompt> --output-format stream-json --verbose --permission-mode acceptEdits --strict-mcp-config --setting-sources ""`, allowed only `uv run`, `uv sync`, `git diff`, `git status`, and the file tools. Skills, subagents, and web tools are disallowed. `--setting-sources ""` keeps user plugins and settings out, but your global `CLAUDE.md` may still load. Both variants get the same one, so the comparison stays fair.
-- Codex runs as `codex exec --json -C <dir> --sandbox workspace-write --skip-git-repo-check --ignore-user-config`, plus `-m` when a model is given. The shared uv cache is added with `--add-dir`.
+- Codex runs as `codex exec --json -C <dir> --sandbox workspace-write --skip-git-repo-check --ignore-user-config`, plus `-m` when a model is given. The shared uv cache is added with `--add-dir`. Each run gets a `CODEX_HOME` that holds only a link to your `auth.json`, because `--ignore-user-config` still loads `$CODEX_HOME/AGENTS.md`. The judge runs the same way.
 
 ## Variants
 

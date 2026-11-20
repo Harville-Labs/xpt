@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,clean,init} [options]
+xpt {failures,show,accept,reject,runs,clean,init,convert} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -70,13 +70,35 @@ The checks report:
 |---|---|
 | `--dry-run` | Report what would change and write nothing. The checks still run. |
 
+### `xpt convert PATH [PATH ...]`
+
+Rewrite `assert <expr> == <literal>` as `expect(<expr>, <literal>)` in test files, and add `from xpt import expect` where it is missing. A directory is searched for `test_*.py` and `*_test.py`, skipping hidden directories, `__pycache__`, `node_modules`, and `site-packages`. Every path must be under `--root`.
+
+The literal may be on either side. It is anything `ast.literal_eval` accepts: strings, numbers, `True`, `False`, `None`, and lists, tuples, sets, and dicts of them. The rest of the file keeps its bytes, including comments, newline style, and byte order mark.
+
+An assert is skipped, with its line and reason, when converting it could change what the test checks or lose something:
+
+- It has a message.
+- It is a chained comparison, such as `a == b == c`.
+- Neither side is a literal, or both are.
+- The literal holds a float or complex number, which `==` compares exactly. Convert it by hand, or use `atol=`.
+- The literal holds bytes, which xpt cannot record.
+- A comment sits inside the assert.
+- The file binds the name `expect` to something else.
+
+Asserts that are not an `==` comparison are left alone without a report. A file that is not UTF-8 or does not parse is skipped whole. Files are written the way `xpt accept` writes them: to a temporary file that is moved into place.
+
+| Option | Meaning |
+|---|---|
+| `--dry-run` | Report what would change and write nothing. |
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
 | `1` | `failures` found failures, `accept` or `reject` left a requested call site stale or skipped, or an `init` check found a problem. |
-| `2` | A usage error, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, or unpaired markers in `AGENTS.md`. The error is one line on stderr that says what to do next, and nothing is written. |
+| `2` | A usage error, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, or unpaired markers in `AGENTS.md`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files
 

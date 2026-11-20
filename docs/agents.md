@@ -29,6 +29,10 @@ This project uses xpt inline expect tests (https://harville-labs.github.io/xpt/)
 
 xpt's tests check that this block and the text `xpt init` writes are the same.
 
+## Moving existing tests to xpt
+
+`xpt convert tests` rewrites `assert value == literal` as `expect(value, literal)`, so later changes show as a diff an agent can accept. It skips asserts it can't convert without changing their meaning, such as float literals or asserts with a message, and lists each with its line and reason. Run it with `--dry-run` first.
+
 ## Reading the footer
 
 | Footer | Meaning |

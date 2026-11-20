@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import decisions, init, render
+from xpt import convert, decisions, init, render
 from xpt.accept import AcceptError, AcceptResult, accept, lock
 from xpt.group import Group, group, missing
 from xpt.record import (
@@ -152,6 +152,16 @@ def init_command(args: argparse.Namespace, root: Path) -> Output:
     )
 
 
+def convert_command(args: argparse.Namespace, root: Path) -> Output:
+    result = convert.convert(root, args.paths, dry_run=args.dry_run)
+    retry = " ".join(["xpt convert", *(p.as_posix() for p in args.paths)])
+    return Output(
+        0,
+        convert.lines(result, args.dry_run, retry),
+        convert.to_json(result, args.dry_run),
+    )
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise UsageError(f"{message}. Run {self.prog} --help for usage.")
@@ -166,8 +176,8 @@ def _parser() -> argparse.ArgumentParser:
 
     parser = _Parser(
         prog="xpt",
-        description="Review, accept, and reject recorded expect() failures, and set a project up "
-        "for xpt.",
+        description="Review, accept, and reject recorded expect() failures, set a project up "
+        "for xpt, and convert assert-equals tests.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -191,6 +201,9 @@ def _parser() -> argparse.ArgumentParser:
     add("clean", clean, "delete .xpt/ and every recorded value")
     sub = add("init", init_command, "add xpt's agent instructions to AGENTS.md and check pytest")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub = add("convert", convert_command, "rewrite assert x == literal as expect(x, literal)")
+    sub.add_argument("paths", nargs="+", type=Path, metavar="path")
+    sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
     return parser
 
 
@@ -201,7 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         output: Output = args.handler(args, args.root)
-    except (UsageError, RecordError, AcceptError, init.InitError) as error:
+    except (UsageError, RecordError, AcceptError, convert.ConvertError, init.InitError) as error:
         print(f"xpt: error: {error}", file=sys.stderr)
         return 2
     if args.json:

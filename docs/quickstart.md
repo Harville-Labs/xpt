@@ -8,7 +8,7 @@ This walks through one loop: write a test with no expectation, let xpt fill it, 
 uv add --dev xpt
 ```
 
-If coding agents work in the project, `xpt init` adds xpt's instructions to `AGENTS.md` and checks that pytest loads the plugin.
+If coding agents work in the project, `xpt init` adds xpt's instructions to `AGENTS.md` and checks that pytest loads the plugin. To move existing `assert value == literal` tests to `expect`, run `xpt convert tests --dry-run`, then without `--dry-run`.
 
 ## 2. Write a test without an expected value
 

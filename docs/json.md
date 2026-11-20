@@ -90,6 +90,21 @@ An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `ski
 
 `status` is `created`, `added`, `present`, or `kept`. `note` says why a `kept` block was left alone, and is empty otherwise.
 
+## Convert
+
+```json
+{
+  "schema_version": 1,
+  "command": "convert",
+  "dry_run": false,
+  "converted": [{"path": "tests/test_demo.py", "line": 4}],
+  "skipped": [{"path": "tests/test_demo.py", "line": 9, "reason": "neither side is a literal."}],
+  "changed": ["tests/test_demo.py"]
+}
+```
+
+A skip's `line` is `null` when the whole file was skipped.
+
 ## Runs
 
 ```json

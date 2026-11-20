@@ -2,20 +2,17 @@ from __future__ import annotations
 
 import ast
 import codecs
-import io
-import re
-import tokenize
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from xpt import pyfile
 from xpt.atomic import replace
+from xpt.pyfile import PyFile
 from xpt.value import Json
 
 IMPORT = "from xpt import expect"
 
-_NEWLINE = re.compile(rb"\r\n|\r|\n")
-_UTF_8 = ("utf-8", "utf-8-sig")
 _SKIPPED_DIRS = frozenset({"__pycache__", "node_modules", "site-packages"})
 _INEXACT = (
     "and == on floats is exact. "
@@ -61,22 +58,6 @@ class _Edit:
     start: int
     end: int
     text: bytes
-
-
-@dataclass(frozen=True, slots=True)
-class _Source:
-    data: bytes
-    starts: tuple[int, ...]
-    newline: bytes
-    comments: tuple[int, ...]
-    tree: ast.Module
-
-    def offset(self, line: int, col: int) -> int:
-        return self.starts[line - 1] + col
-
-    def span(self, node: ast.stmt | ast.expr) -> tuple[int, int]:
-        end = self.offset(node.end_lineno or node.lineno, node.end_col_offset or 0)
-        return self.offset(node.lineno, node.col_offset), end
 
 
 def convert(root: Path, paths: Sequence[Path], *, dry_run: bool = False) -> ConvertResult:
@@ -140,7 +121,7 @@ def _test_files(directory: Path) -> Iterator[Path]:
 def convert_source(path: str, data: bytes) -> FilePlan:
     """Plan and apply every safe conversion in one file's bytes."""
     bom = codecs.BOM_UTF8 if data.startswith(codecs.BOM_UTF8) else b""
-    source = _read(path, data[len(bom) :])
+    source = pyfile.read(path, data[len(bom) :], "convert")
     if isinstance(source, str):
         return FilePlan(data, (), (Skip(path, None, source),))
     bound = _foreign_expect(source.tree)
@@ -181,33 +162,6 @@ def _line(skip: Skip) -> int:
     return skip.line or 0
 
 
-def _read(path: str, data: bytes) -> _Source | str:
-    try:
-        encoding, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
-    except SyntaxError as error:
-        return f"{path} has an unreadable encoding declaration ({error.msg})."
-    if encoding not in _UTF_8:
-        return f"{path} is encoded as {encoding}. xpt convert writes only UTF-8 files."
-    try:
-        text = data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    except UnicodeDecodeError as error:
-        return f"{path} is not valid UTF-8 ({error.reason} at byte {error.start})."
-    try:
-        tree = ast.parse(text, path)
-    except SyntaxError as error:
-        return (
-            f"{path} does not parse ({error.msg}, line {error.lineno}). Fix it and convert again."
-        )
-    starts = (0, *(m.end() for m in _NEWLINE.finditer(data)))
-    first = _NEWLINE.search(data)
-    comments = tuple(
-        starts[t.start[0] - 1] + len(t.line[: t.start[1]].encode("utf-8"))
-        for t in tokenize.generate_tokens(io.StringIO(text).readline)
-        if t.type == tokenize.COMMENT
-    )
-    return _Source(data, starts, first.group() if first else b"\n", comments, tree)
-
-
 def _equality_asserts(tree: ast.Module) -> list[ast.Assert]:
     found = [
         n
@@ -219,7 +173,7 @@ def _equality_asserts(tree: ast.Module) -> list[ast.Assert]:
     return sorted(found, key=lambda n: (n.lineno, n.col_offset))
 
 
-def _edit(source: _Source, node: ast.Assert) -> _Edit:
+def _edit(source: PyFile, node: ast.Assert) -> _Edit:
     test = node.test
     assert isinstance(test, ast.Compare)
     if node.msg is not None:
@@ -315,7 +269,7 @@ def _imports_expect(tree: ast.Module) -> bool:
     )
 
 
-def _import(source: _Source) -> _Edit:
+def _import(source: PyFile) -> _Edit:
     """Add the import after the leading docstring and imports, or above the first statement."""
     body = source.tree.body
     lead = 1 if _docstring(body[0]) else 0
@@ -326,13 +280,13 @@ def _import(source: _Source) -> _Edit:
         first = body[0]
         decorators = getattr(first, "decorator_list", [])
         at = source.offset(min([first.lineno, *(d.lineno for d in decorators)]), 0)
-        return _Edit(at, at, line + source.newline)
+        return _Edit(at, at, line + source.newline.encode())
     anchor, following = body[lead - 1], body[lead]
     _, end = source.span(anchor)
     if following.lineno == anchor.end_lineno:
         return _Edit(end, end, b"; " + line)
     at = source.starts[anchor.end_lineno or anchor.lineno]
-    return _Edit(at, at, line + source.newline)
+    return _Edit(at, at, line + source.newline.encode())
 
 
 def _docstring(node: ast.stmt) -> bool:

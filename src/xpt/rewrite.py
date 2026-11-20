@@ -15,7 +15,7 @@ from xpt.site import Unlocatable, arg_sha, expected_arg, find_call, scopes
 from xpt.source import display_width, to_source
 from xpt.value import Dataclass, Dict, Ref, Seq, Set, Value
 
-OutcomeStatus = Literal["accepted", "already_accepted", "stale", "skipped"]
+OutcomeStatus = Literal["accepted", "already_accepted", "stale", "skipped", "suspect"]
 
 _NEWLINE = re.compile(rb"\r\n|\r|\n")
 _UTF_8 = ("utf-8", "utf-8-sig")

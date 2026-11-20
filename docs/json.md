@@ -69,7 +69,7 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 }
 ```
 
-An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `skipped`, and `reason` says why it wasn't written. `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
+An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).` `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
 
 ## Runs
 

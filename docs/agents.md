@@ -6,7 +6,7 @@ xpt is built for agents that run tests, read the output, and change code. Three 
 - **Accepting is explicit.** A run never writes to the source. `xpt accept` writes only the call sites it is given, refuses when the expected argument changed since the run, and `xpt reject` stops a bug from being offered again.
 - **Everything has JSON.** Every command takes `--json`, and `pytest --xpt-json=PATH` writes the full report.
 
-The risk with any snapshot tool is an agent that accepts a wrong value to make a test pass. xpt can't decide whether a value is right. It makes the decision visible: every diff is on screen before the footer suggests an accept, and a rejected value stays rejected.
+The risk with any snapshot tool is an agent that accepts a wrong value to make a test pass. xpt can't decide whether a value is right. It makes the decision visible: every diff is on screen before the footer suggests an accept, and a rejected value stays rejected. Accept also refuses values that look like failures, such as an exception repr, `None` where there was data, a list that became empty, or a new `nan`, unless you pass `--force`.
 
 ## Paste into AGENTS.md
 
@@ -20,6 +20,7 @@ This project uses xpt inline expect tests (https://harville-labs.github.io/xpt/)
   - Correct, because the code's behavior was meant to change: `xpt accept <id>`.
   - A bug: fix the code. If you can't fix it now, run `xpt reject <id>` so it isn't accepted by accident.
 - Never run `xpt accept --all` without reading every diff `xpt failures` prints first.
+- When accept reports `suspect`, the value looks like a failure. Fix the code. Use `xpt accept --force <id>` only when that value is really the intended result.
 - Don't hand-edit an expected value that xpt can write. Accept it, so the value is exactly what the code returned.
 - `xpt show <id> --full` prints whole values when the diff is cut.
 - Use `--json` on any xpt command when parsing its output.

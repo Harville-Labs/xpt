@@ -97,16 +97,17 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
         groups, target = missing(run.groups), "--missing"
     else:
         groups, target = _pick(run, args.ids), " ".join(args.ids)
+    if args.force:
+        target += " --force"
     data: dict[str, Json] = {"run": run.id, "dry_run": args.dry_run}
     if not groups:
         empty = render.accept_json(AcceptResult((), ()))
         return Output(0, [f"Nothing to accept in run {run.id}."], data | empty)
-    result = accept(root, groups, dry_run=args.dry_run)
+    result = accept(root, groups, dry_run=args.dry_run, force=args.force)
     written = all(o.status in ("accepted", "already_accepted") for o in result.outcomes)
-    retry = f"xpt accept{run.run_option} {target}"
     return Output(
         0 if written else 1,
-        render.accept_lines(result, args.dry_run, retry),
+        render.accept_lines(result, args.dry_run, run.run_option, target),
         data | render.accept_json(result),
     )
 
@@ -173,6 +174,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--all", action="store_true", help="every acceptable call site")
     sub.add_argument("--missing", action="store_true", help="only empty expectations")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub.add_argument(
+        "--force", action="store_true", help="accept values that look broken, such as exceptions"
+    )
     sub = add("reject", reject, "record actual values as bugs, never to be offered", picked)
     sub.add_argument("ids", nargs="+", metavar="id")
     add("runs", runs, "list recorded runs")

@@ -13,6 +13,7 @@ from xpt.group import Group
 from xpt.record import state_directory
 from xpt.rewrite import Outcome, rewrite
 from xpt.site import Unlocatable
+from xpt.suspect import suspect
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,10 +28,16 @@ class AcceptError(Exception):
     pass
 
 
-def accept(root: Path, groups: Iterable[Group], *, dry_run: bool = False) -> AcceptResult:
+_FORCE_HINT = " Fix the code under test, or accept it with --force if it is right."
+
+
+def accept(
+    root: Path, groups: Iterable[Group], *, dry_run: bool = False, force: bool = False
+) -> AcceptResult:
     """Write each acceptable group's actual value into its source file as the expected value.
 
-    A group is written only when its expected argument's text still matches the run. Each
+    A group is written only when its expected argument's text still matches the run, and,
+    unless `force`, when its actual value does not look broken (see `xpt.suspect`). Each
     file is rewritten in one pass to a temporary file and moved into place, under an
     exclusive `.xpt/accept.lock`. A dry run reports the same result and writes nothing.
     """
@@ -41,6 +48,8 @@ def accept(root: Path, groups: Iterable[Group], *, dry_run: bool = False) -> Acc
         site = g.site
         if not g.acceptable or isinstance(site, Unlocatable):
             outcomes[i] = Outcome(g, "skipped", g.detail)
+        elif not force and (found := suspect(g.expected, g.actuals[0])):
+            outcomes[i] = Outcome(g, "suspect", found.reason + _FORCE_HINT)
         else:
             by_path[site.path].append(i)
     changed = []

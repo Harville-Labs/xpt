@@ -75,16 +75,20 @@ def show_lines(g: Group, full: bool, run_option: str) -> Lines:
     return [*lines, f"{g.id} cannot be accepted. Fix the test and run it again."]
 
 
-def accept_lines(result: AcceptResult, dry_run: bool, retry: str) -> Lines:
+def accept_lines(result: AcceptResult, dry_run: bool, run_option: str, target: str) -> Lines:
     lines = _outcome_lines(result.outcomes)
     counts = f"({_statuses(o.status for o in result.outcomes)})"
     files = ", ".join(result.changed)
     if dry_run:
         done = f"Dry run, would change {files}" if files else "Dry run, no files would change"
-        return [*lines, f"{done} {counts}. Next: {retry}"]
+        return [*lines, f"{done} {counts}. Next: xpt accept{run_option} {target}"]
     done = f"Changed {files}" if files else "No files changed"
+    suspects = [o.group.id for o in result.outcomes if o.status == "suspect" and o.group.id]
     if any(o.status == "stale" for o in result.outcomes):
         return [*lines, f"{done} {counts}. Next: run the tests, then xpt failures."]
+    if suspects:
+        force = f"xpt accept{run_option} --force {' '.join(suspects)}"
+        return [*lines, f"{done} {counts}. Next: fix the code under test, or run {force}."]
     return [*lines, f"{done} {counts}. Next: run the tests."]
 
 

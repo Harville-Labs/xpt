@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import Literal, TypeVar
 
 from xpt.diff import norm
+from xpt.options import PLAIN, Options
 from xpt.record import Observation
 from xpt.report import show
 from xpt.site import CallSite, SiteKey, Unlocatable, short_ids
-from xpt.tolerance import EXACT, Tolerance
 from xpt.value import Value, canonical
 
 GroupStatus = Literal["missing", "mismatch", "unsupported", "unlocatable", "conflict"]
@@ -37,7 +37,7 @@ class Group:
     tests: tuple[str, ...]
     detail: str
     rejected: bool = False
-    tolerance: Tolerance = EXACT
+    options: Options = PLAIN
 
     @property
     def acceptable(self) -> bool:
@@ -80,8 +80,8 @@ def _located(id: str, seen: list[tuple[CallSite, Observation]]) -> Group:
 
     def made(status: GroupStatus, detail: str = "") -> Group:
         tests = _tests(observations)
-        tol = observations[0].tolerance
-        return Group(id, site, status, values, one_expected, tests, detail, tolerance=tol)
+        how = observations[0].options
+        return Group(id, site, status, values, one_expected, tests, detail, options=how)
 
     if len(sources) > 1:
         shown = [(f"source {sha[:8]}" if sha else "no expected argument", t) for sha, t in sources]

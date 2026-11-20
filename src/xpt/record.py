@@ -13,8 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, TextIO, TypeVar, cast
 
+from xpt.options import PLAIN, Options, options
 from xpt.site import CallSite, Unlocatable
-from xpt.tolerance import EXACT, Tolerance, tolerance
 from xpt.value import Value, canonical, from_json, to_json
 
 Status = Literal["missing", "mismatch", "unsupported"]
@@ -39,7 +39,7 @@ class Observation:
     expected: Value | None
     actual: Value | None
     detail: str
-    tolerance: Tolerance = EXACT
+    options: Options = PLAIN
 
 
 class RecordError(ValueError):
@@ -214,7 +214,7 @@ def to_record(o: Observation) -> dict[str, object]:
         record["expected"] = to_json(o.expected)
     if o.actual is not None:
         record["actual"] = to_json(o.actual)
-    record.update(o.tolerance.fields())
+    record.update(o.options.fields())
     return record
 
 
@@ -237,7 +237,7 @@ def _without_values(o: Observation, size: int) -> Observation:
     text = canonical(value) if value is not None else ""
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     detail = f"too large: {size} bytes, sha256 {digest}"
-    return Observation(o.run, o.test, o.site, o.status, None, None, detail, o.tolerance)
+    return Observation(o.run, o.test, o.site, o.status, None, None, detail, o.options)
 
 
 def versioned(data: object) -> dict[str, object]:
@@ -262,13 +262,18 @@ def from_record(data: object) -> Observation:
         expected=_value(record, "expected"),
         actual=_value(record, "actual"),
         detail=json_str(record, "detail"),
-        tolerance=_tolerance(record),
+        options=_options(record),
     )
 
 
-def _tolerance(record: dict[str, object]) -> Tolerance:
+def _options(record: dict[str, object]) -> Options:
     try:
-        return tolerance(record.get("atol", 0.0), record.get("rtol", 0.0))
+        return options(
+            record.get("atol", 0.0),
+            record.get("rtol", 0.0),
+            record.get("ignore", []),
+            record.get("unordered", False),
+        )
     except TypeError as error:
         raise ValueError(str(error)) from None
 

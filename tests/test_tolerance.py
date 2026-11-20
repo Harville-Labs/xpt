@@ -9,6 +9,7 @@ from test_rewrite import rewritten
 from xpt import expect
 from xpt.diff import diff
 from xpt.group import group
+from xpt.options import Options
 from xpt.record import load_run, to_record
 from xpt.render import group_diff
 from xpt.serialize import serialize
@@ -85,7 +86,7 @@ def test_the_tolerance_is_recorded_so_review_diffs_use_it(tmp_path: Path):
         run,
         expected=Seq("list", (Float("1.0"), Float("2.0"))),
         actual=Seq("list", (Float("1.0004"), Float("2.5"))),
-        tolerance=Tolerance(atol=1e-3),
+        options=Options(Tolerance(atol=1e-3)),
     )
     finished(tmp_path, run, within)
     [loaded] = load_run(tmp_path)

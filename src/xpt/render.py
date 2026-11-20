@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 
 from xpt.accept import AcceptResult
 from xpt.decisions import FILE, RejectOutcome
-from xpt.diff import Change, Diff, diff
+from xpt.diff import Change, Diff
 from xpt.group import Group
 from xpt.path import format_path
 from xpt.report import MAX_CHANGES, MAX_CHARS, changes, show
@@ -19,7 +19,7 @@ Lines = list[str]
 def group_diff(g: Group) -> Diff | None:
     if g.status != "mismatch" or g.expected is None or len(g.actuals) != 1:
         return None
-    return diff(g.expected, g.actuals[0], g.tolerance)
+    return g.options.diff(g.expected, g.actuals[0])
 
 
 def heading(id: str | None, site: CallSite | Unlocatable, status: str) -> str:

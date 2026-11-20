@@ -85,7 +85,7 @@ def test_a_path_outside_the_root_is_refused_and_nothing_is_written(
     ran = xpt(capsys, "convert", "tests", str(outside))
     assert ran.code == 2
     assert ran.err == (
-        f"xpt: error: {outside} is outside the root {project.resolve()}. "
+        f"xpt: error: {outside.as_posix()} is outside the root {project.resolve().as_posix()}. "
         "Run xpt convert from the project root or pass --root.\n"
     )
     assert (project / "tests/test_a.py").read_bytes() == before

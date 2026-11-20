@@ -57,6 +57,7 @@ xpt accept b211 ee17      # these call sites
 xpt accept --missing      # only empty expectations
 xpt accept --all          # every acceptable call site that was not rejected
 xpt accept --dry-run b211 # report what would change, write nothing
+xpt accept --force b211   # also accept a value that looks broken
 ```
 
 `xpt accept` with no ids and no flag does nothing and says so.
@@ -64,6 +65,7 @@ xpt accept --dry-run b211 # report what would change, write nothing
 Accept is careful about what it writes.
 
 - It checks that the expected argument's text still matches the run, and refuses with `stale` if you edited it since. Run the tests again to record a fresh value.
+- It refuses with `suspect` a value that looks like a failure: an exception repr or traceback, `None` where there was data, a collection that became empty, or a new `nan`. The reason names the path and the rule. Pass `--force` with the ids when the value is right. See the [CLI reference](cli.md).
 - Lines added or removed elsewhere in the file don't matter.
 - A second accept of the same value is a no-op and reports `already_accepted`.
 - It rewrites each file once, through a temporary file, under `.xpt/accept.lock`. The new text must compile before it is written.

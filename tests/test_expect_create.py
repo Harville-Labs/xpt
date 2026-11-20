@@ -175,3 +175,21 @@ def test_a_rejected_missing_value_is_not_filled(project: pytest.Pytester):
     assert rejected.ret == 0, rejected.outlines
     run(project, "--expect-create").assert_outcomes(failed=3)
     assert source(project) == FILLED.replace("expect([1, 2], [1, 2])", "expect([1, 2])")
+
+
+def test_an_exception_repr_is_not_filled_but_an_empty_value_is(pytester: pytest.Pytester):
+    pytester.makepyfile(
+        test_sample=(
+            "from xpt import expect\n\n"
+            "def test_error():\n    expect(repr(KeyError('a')))\n\n"
+            "def test_empty():\n    expect([])\n"
+        )
+    )
+    run(pytester, "--expect-create", "--xpt-json", "report.json")
+    assert "    expect(repr(KeyError('a')))\n" in source(pytester)
+    assert source(pytester).endswith("    expect([], [])")
+    report = json.loads((pytester.path / "report.json").read_text(encoding="utf-8"))
+    assert [(o["site"]["line"], o["status"]) for o in report["created"]["outcomes"]] == [
+        (4, "suspect"),
+        (7, "accepted"),
+    ]

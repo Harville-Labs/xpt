@@ -1,5 +1,11 @@
 # xpt
 
+[![check](https://github.com/Harville-Labs/xpt/actions/workflows/check.yaml/badge.svg?branch=main)](https://github.com/Harville-Labs/xpt/actions/workflows/check.yaml)
+[![docs](https://github.com/Harville-Labs/xpt/actions/workflows/docs.yaml/badge.svg?branch=main)](https://harville-labs.github.io/xpt/)
+[![PyPI](https://img.shields.io/pypi/v/xpt)](https://pypi.org/project/xpt/)
+[![Python](https://img.shields.io/pypi/pyversions/xpt)](https://pypi.org/project/xpt/)
+[![License](https://img.shields.io/pypi/l/xpt)](LICENSE)
+
 Inline expect tests for Python, built so coding agents can work with them cheaply and safely.
 
 ```python
@@ -57,7 +63,7 @@ The run still fails, because the filled expectations were empty when their tests
 
 `xpt accept` writes without running the tests again, and refuses if that source changed since the run. `xpt reject` records in `.xpt/decisions.jsonl` that a call site's actual value is a real bug. `xpt failures` and the pytest footer then mark that call site `rejected` and stop suggesting it, until a run records a different value there. Every command takes `--json`. Exit codes are 0 for done or nothing to do, 1 when failures remain or an accept or reject was refused, and 2 for a usage error. `python -m xpt` works too, and `xpt.api` is the same surface for tools.
 
-Status: alpha. The documentation is at https://harville-labs.github.io/xpt/, and [llms.txt](https://harville-labs.github.io/xpt/llms.txt) indexes it as Markdown for language models. Read [docs/design.md](docs/design.md) for the design and roadmap, and [docs/research.md](docs/research.md) for how expecttest, inline-snapshot, syrupy, and ApprovalTests compare. Plans are tracked as GitHub issues.
+Status: alpha. The documentation is at https://harville-labs.github.io/xpt/, and [llms.txt](https://harville-labs.github.io/xpt/llms.txt) indexes it as Markdown for language models. Read [docs/design.md](docs/design.md) for the design and roadmap. Plans are tracked as GitHub issues.
 
 
 [bench/](bench/README.md) measures whether agents fix failing suites with fewer tokens and no more wrong accepts using xpt's report than with pytest's own output.

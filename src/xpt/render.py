@@ -76,7 +76,7 @@ def show_lines(g: Group, full: bool, run_option: str) -> Lines:
 
 
 def accept_lines(result: AcceptResult, dry_run: bool, retry: str) -> Lines:
-    lines = _outcome_lines(result.outcomes)
+    lines = outcome_lines(result.outcomes)
     counts = f"({_statuses(o.status for o in result.outcomes)})"
     files = ", ".join(result.changed)
     if dry_run:
@@ -89,7 +89,7 @@ def accept_lines(result: AcceptResult, dry_run: bool, retry: str) -> Lines:
 
 
 def reject_lines(outcomes: Sequence[RejectOutcome]) -> Lines:
-    lines = _outcome_lines(outcomes)
+    lines = outcome_lines(outcomes)
     added = sum(o.status == "rejected" for o in outcomes)
     done = (
         f"Recorded {_count(added, 'rejection')} in .xpt/{FILE}"
@@ -100,7 +100,7 @@ def reject_lines(outcomes: Sequence[RejectOutcome]) -> Lines:
     return [*lines, f"{done} ({counts}). Next: fix the code under test, then run the tests."]
 
 
-def _outcome_lines(outcomes: Sequence[Outcome | RejectOutcome]) -> Lines:
+def outcome_lines(outcomes: Sequence[Outcome | RejectOutcome]) -> Lines:
     lines = []
     for o in outcomes:
         lines.append(heading(o.group.id, o.group.site, o.status))

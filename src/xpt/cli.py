@@ -12,7 +12,7 @@ from typing import NoReturn
 
 from xpt import decisions, render
 from xpt.accept import AcceptError, AcceptResult, accept, lock
-from xpt.group import Group, group, missing
+from xpt.group import Group, group, missing, pick
 from xpt.record import (
     DIRECTORY,
     SCHEMA_VERSION,
@@ -53,13 +53,12 @@ def _load(root: Path, run: str | None) -> _Run:
 
 
 def _pick(run: _Run, ids: Sequence[str]) -> list[Group]:
-    by_id = {g.id: g for g in run.groups if g.id is not None}
-    unknown = [i for i in ids if i not in by_id]
+    chosen, unknown = pick(run.groups, ids)
     if unknown:
         raise UsageError(
             f"no group {', '.join(unknown)} in run {run.id}. Run xpt failures to list the ids."
         )
-    return [by_id[i] for i in dict.fromkeys(ids)]
+    return chosen
 
 
 def failures(args: argparse.Namespace, root: Path) -> Output:

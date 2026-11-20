@@ -54,6 +54,14 @@ def missing(groups: Iterable[Group]) -> list[Group]:
     return [g for g in groups if g.status == "missing" and not g.rejected]
 
 
+def pick(groups: Iterable[Group], ids: Iterable[str]) -> tuple[list[Group], tuple[str, ...]]:
+    """The groups with the given ids, in the order given without repeats, and the ids that
+    name no group."""
+    by_id = {g.id: g for g in groups if g.id is not None}
+    wanted = list(dict.fromkeys(ids))
+    return [by_id[i] for i in wanted if i in by_id], tuple(i for i in wanted if i not in by_id)
+
+
 def group(observations: Iterable[Observation]) -> tuple[Group, ...]:
     """Group a run's observations by call site, in path, line, and ordinal order."""
     located: dict[SiteKey, list[tuple[CallSite, Observation]]] = defaultdict(list)

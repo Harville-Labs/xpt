@@ -102,6 +102,13 @@ Observation     # one failed call of expect() in one run
   expected: Value | None  # None when missing or unsupported
   actual: Value | None    # None when unsupported or over the size cap
   detail: str             # "" normally; the UnsupportedValue message, or "too large: N bytes, sha256 <hex>"
+  options: Options        # how the call compared; both values already have ignore and unordered applied
+  key: Value | None       # the case's key= value, None for an unkeyed call
+
+Options         # the comparison keywords of one expect() call
+  tolerance: Tolerance    # atol and rtol
+  ignore: [path]          # dict entries removed from both values, parsed from strings like 'value["id"]'
+  unordered: bool         # lists and tuples sorted and compared as multisets
 
 Group           # every failed observation of one call site in a run, built at read time
   id: str | None          # short display id, None for an unlocatable site
@@ -112,6 +119,7 @@ Group           # every failed observation of one call site in a run, built at r
   tests: [str]            # every test that reached the site
   detail: str             # why the group cannot be accepted, "" when it can
   rejected: bool          # its one actual value matches a Rejection in decisions.jsonl
+  options: Options        # the first observation's, used for every diff of the group
   acceptable              # derived: status is missing or mismatch
   offered                 # derived: acceptable and not rejected; what footers suggest
 
@@ -140,7 +148,7 @@ Change
   actual: Value | None
 ```
 
-An observation stores no diff and no id. Readers derive both: `diff(expected, actual)` gives the changes, and `site_id(site)` gives the id. One copy of each rule means a stored diff can never disagree with the values it came from. `conflict` is not recorded either. It is the status of a group of observations whose values differ (see Conflicting observations).
+An observation stores no diff and no id. Readers derive both: `options.diff(expected, actual)` gives the changes, and `site_id(site)` gives the id. One copy of each rule means a stored diff can never disagree with the values it came from. `conflict` is not recorded either. It is the status of a group of observations whose values differ (see Conflicting observations).
 
 A passing assertion writes nothing. Run state lives on disk as records. In memory there is only the open file handle.
 
@@ -166,7 +174,8 @@ We do not hash the whole file. A whole-file hash would refuse every accept after
 One call site can run many times: in a loop, in a parametrized test, from a helper. The records for one site are grouped at read time.
 
 - If every observation has the same value, it is a single change.
-- If the values differ, the status is `conflict`. Accept refuses and lists the distinct values with their test ids. The fix is a separate `expect()` per case, or `expect(value, expected, key=param)` in a later milestone.
+- If the values differ, the status is `conflict`. Accept refuses and lists the distinct values with their test ids. The fix is a separate `expect()` per case, or `expect(value, {param: expected, ...}, key=param)`.
+- With `key=`, every observation stores the whole expected dict and, as its actual value, that dict with its own case replaced. Grouping merges them: the group's actual value is the expected dict with every failing case's entry set. Cases that passed record nothing, so their entries come through unchanged from the expected dict. The group is `missing` when every failing case had no entry, and `mismatch` otherwise. Two calls with the same key and different values conflict, and so does a site that mixes keyed and unkeyed calls.
 - Values are equal when `norm` says so, the same equality `diff` uses, so `1` and `1.0` agree.
 - Calls that disagree on `arg_sha` are a conflict too, because the file changed during the run. So are calls with equal actual values but different expected values, which happens when the expected argument depends on a parameter.
 - If any call recorded no actual value (unsupported, or over the size cap), the group is `unsupported` and cannot be accepted.
@@ -241,7 +250,7 @@ A rejection is one line in `.xpt/decisions.jsonl`:
 - Each pytest process, controller or xdist worker, appends to its own file. Nothing is shared, so nothing is locked. This follows "separate before serializing shared state."
 - The controller writes `latest` at session end with `os.replace`, so a crashed run never becomes the latest.
 - Old runs are pruned to the last 5 by default.
-- Each line is one JSON object with `"schema_version": 1`. A value that is absent (`expected` when missing) is left out of the object, so a recorded `None` stays distinct from no value. `atol` and `rtol` appear only when they are not 0. Reading a run validates every line and names the file and line of a malformed one.
+- Each line is one JSON object with `"schema_version": 1`. A value that is absent (`expected` when missing) is left out of the object, so a recorded `None` stays distinct from no value. `atol` and `rtol` appear only when they are not 0, `ignore` (a list of path strings) only when set, `unordered` only when true, and `key` (a recorded value) only for a keyed call. Reading a run validates every line and names the file and line of a malformed one.
 - A process with no driver, such as plain unittest or a script, records under the current directory and writes `latest` from an `atexit` hook. Under xdist, the controller hands its run id to each worker.
 - A record over 1 MB keeps its status and site but drops both values. Its detail holds the record's size and the sha256 of the value.
 - `XPT_NO_RECORD` set to any non-empty value turns recording off, like `--expect-no-record`.
@@ -286,6 +295,16 @@ A value an adapter cannot express as one constructor call is wrapped in an xpt h
 Arrays over 10,000 elements are written as `expect.digest(...)`, the same kind of helper. A digest compares on kind, shape, dtype, device, and the sha256 of the little-endian, C-order bytes. Its `min`, `max`, and `mean` fields are only for the reader, so an edit to them never changes the verdict. A failure on an array of the same shape adds one line with the count of differing elements and the largest difference, computed by the diff walker from the changes it already found.
 
 Acceptance never runs code from the record. It builds source text from the `Value` tree. It never calls `eval`, `pickle`, or the observed object's `__repr__`.
+
+## Comparison options
+
+`ignore=`, `unordered=`, and `key=` let an agent keep volatile or order-free data out of an expectation without hand-editing the recorded value. `xpt.options.Options` holds `ignore`, `unordered`, and the tolerance for one call, and `options()` parses the keyword arguments where they enter.
+
+- **Ignore paths are diff paths.** A path is a string written exactly as a diff prints it, rooted at `value`: `'value["created"]'`, `'value.user["id"]'`, `'value["rows"][...]["id"]'`. We chose this over dotted strings and tuples. An agent reading a failure can paste the path from the diff line, with no translation step to get wrong. Dotted strings cannot tell the key `"0"` from the index `0`, or hold a key with a dot in it. Tuples are unambiguous but appear nowhere in xpt's output. Paths parse with `ast` and `ast.literal_eval`, so the key syntax is Python's and nothing is evaluated. `[...]` is the one addition, a wildcard over list items and dict values.
+- **Ignore removes dict entries only.** Removing a list item would shift every later index, and removing a dataclass or model field would leave xpt unable to write the constructor. Both are refused with the alternative. Because the entries are gone before the value is recorded, the stored values, the diff, grouping, rejection hashes, and the accepted source all agree, and none of them needs to know about `ignore`.
+- **Unordered sorts before comparing.** Every list and tuple is sorted by its canonical JSON, recursively, except inside arrays, tensors, pandas objects, and digests, whose order is their data. Sorting once makes accepted source stable. The diff still matches items as a multiset, so one inserted item reports one `add` instead of a shifted tail, and an item within the tolerance matches.
+- **The pass check stays `==` first.** A call returns as soon as `equal` passes, so options cost nothing on the passing path. Only a failing call serializes, applies the options, and compares again.
+- **Key keeps identity unchanged.** A keyed call site is still one site with one expected argument, so `arg_sha`, stale detection, and rewrite work as before. Each case is an entry in that argument's dict, and grouping merges the cases into one value (see Conflicting observations). Splitting one site into several identities per key would have needed a key in `SiteKey`, a key-aware rewrite, and per-key fingerprints, for no gain to the reviewer, who still edits one dict.
 
 ## Reporting
 
@@ -369,7 +388,7 @@ Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, becaus
 - **Rubber-stamping.** The tool makes accepting cheap, so agents will accept regressions. Mitigations: no bulk accept by default, the diff shown at accept time, and `--dry-run`. The benchmark (M5) measures how often wrong accepts happen. We do not claim to prevent them.
 - **Dynamic call sites.** `expect` called through a helper reports the helper's frame. We support `expect(..., _depth=1)` the way expecttest supports `skip`. A call created through `functools.partial` or `exec` has no source to rewrite. We record it as unsupported for rewriting, and the comparison still runs.
 - **Generated or non-file sources** (doctests, notebooks, `python -c`): same as above.
-- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets. `ignore=` and adapters cover the rest. Default `repr` of arbitrary objects is never used, because it embeds addresses.
+- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets, `unordered=` covers lists, `ignore=` covers volatile dict entries, and adapters cover the rest. Default `repr` of arbitrary objects is never used, because it embeds addresses.
 - **Large values.** Records are capped at 1 MB per observation by default. Larger values are recorded as a hash plus a summary and cannot be inline-accepted.
 - **Sensitive data.** `.xpt/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `xpt clean`. The README says so plainly.
 - **Python 3.11 floor** excludes 3.10 users. 3.10 is end of life, so this is acceptable.
@@ -384,7 +403,7 @@ expect(actual)  # missing: fails, records
 expect(actual, expected)  # compares with ==, records on mismatch
 ```
 
-Later, as keyword-only arguments: `ignore=`, `unordered=`, `key=`. These stay in the source, so a reviewer can see them.
+Keyword-only arguments change how a call compares: `atol=`, `rtol=`, `ignore=`, `unordered=`, and `key=`. They stay in the source, so a reviewer can see them, and they are recorded with each observation, so review and accept compare the same way the test did.
 
 pytest plugin options: `--expect-create`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
@@ -395,7 +414,7 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M0. Scaffold.** uv, ruff, ty, pytest, CI on 3.11 to 3.14, MIT license.
 - **M1. Core assertion.** `Value`, `serialize`, `diff`, `to_source` for builtins and dataclasses. `expect()` compares and raises with the compact message. No recording yet.
 - **M2. Record and accept.** Call-site identity, JSON Lines recorder, `failures` / `show` / `accept` / `reject` / `clean`, fingerprint checks, atomic multi-edit writes, `--expect-create`. This is the differentiator and the MVP line.
-- **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests.
+- **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests. The comparison options are done.
 - **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic, attrs, and protobuf adapters are done. Tolerances (`atol=`, `rtol=`) are done. Large-array digests and mismatch counts are done. An xdist test matrix remains.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **M6. Release.** Name check, docs, PyPI.

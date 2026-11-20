@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from xpt import decisions, record
-from xpt.accept import AcceptResult
+from xpt.accept import Accepted, AcceptResult
 from xpt.failure import Failure, Text, Where, streams, where_from_json
 from xpt.summary import Session, limits, report_json, report_lines
 
@@ -20,6 +20,7 @@ except ImportError:  # pytest exports it from 8.4; older releases only have the 
     from _pytest.terminal import TerminalReporter
 
 CREATED = pytest.StashKey[AcceptResult]()
+ACCEPTED = pytest.StashKey[Accepted]()
 
 ISSUES = "https://github.com/Harville-Labs/xpt/issues"
 _NOT_A_TEST_RUN = (
@@ -202,6 +203,7 @@ class AgentReporter(TerminalReporter):  # ty: ignore[subclass-of-final-class]
             run=run,
             rejected=self._rejected() if run else frozenset(),
             created=self.config.stash.get(CREATED, None),
+            accepted=self.config.stash.get(ACCEPTED, None),
         )
 
     def _rejected(self) -> frozenset[decisions.Rejection]:

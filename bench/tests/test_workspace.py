@@ -6,6 +6,7 @@ from xpt_bench.workspace import (
     WorkspaceError,
     banned_words,
     clean_env,
+    codex_home,
     neutral_dir,
     neutrality_problems,
     sweep_root,
@@ -44,3 +45,19 @@ def test_clean_env_drops_parent_session_and_report_vars(monkeypatch: pytest.Monk
     assert env["CLAUDE_CONFIG_DIR"] == "/cfg"
     assert env["XPT_REPORT"] == "agent"
     assert env["UV_CACHE_DIR"] == "/cache"
+
+
+def test_codex_home_holds_only_the_linked_login(tmp_path: Path):
+    user = tmp_path / "user"
+    user.mkdir()
+    (user / "auth.json").write_text("{}")
+    (user / "AGENTS.md").write_text("personal instructions")
+    home = codex_home(tmp_path / "sweep", user)
+    assert sorted(p.name for p in home.iterdir()) == ["auth.json"]
+    assert (home / "auth.json").resolve() == (user / "auth.json").resolve()
+    assert codex_home(tmp_path / "sweep", user) == home
+
+
+def test_codex_home_without_a_login_says_how_to_log_in(tmp_path: Path):
+    with pytest.raises(WorkspaceError, match="codex login"):
+        codex_home(tmp_path / "sweep", tmp_path / "missing")

@@ -178,6 +178,10 @@ def scopes(filename: str, source: str) -> dict[str, list[ast.Call]] | SyntaxErro
         tree = ast.parse(source, filename)
     except SyntaxError as error:
         return error
+    return scopes_in(tree)
+
+
+def scopes_in(tree: ast.Module) -> dict[str, list[ast.Call]]:
     scopes: dict[str, list[ast.Call]] = {}
     _collect(tree.body, "<module>", "", scopes)
     for calls in scopes.values():

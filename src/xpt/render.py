@@ -5,21 +5,22 @@ from collections.abc import Iterable, Sequence
 
 from xpt.accept import AcceptResult
 from xpt.decisions import FILE, RejectOutcome
-from xpt.diff import Change, Diff, diff
+from xpt.diff import Change, Diff
 from xpt.group import Group
 from xpt.path import format_path
 from xpt.report import MAX_CHANGES, MAX_CHARS, changes, show
 from xpt.rewrite import Outcome
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Json, to_json
+from xpt.verify import Rerun
 
 Lines = list[str]
 
 
 def group_diff(g: Group) -> Diff | None:
-    if g.status != "mismatch" or g.expected is None or len(g.actuals) != 1:
+    if not g.acceptable or g.expected is None or len(g.actuals) != 1:
         return None
-    return diff(g.expected, g.actuals[0], g.tolerance)
+    return g.options.diff(g.expected, g.actuals[0])
 
 
 def heading(id: str | None, site: CallSite | Unlocatable, status: str) -> str:
@@ -75,21 +76,51 @@ def show_lines(g: Group, full: bool, run_option: str) -> Lines:
     return [*lines, f"{g.id} cannot be accepted. Fix the test and run it again."]
 
 
-def accept_lines(result: AcceptResult, dry_run: bool, retry: str) -> Lines:
-    lines = _outcome_lines(result.outcomes)
+def accept_lines(
+    result: AcceptResult, dry_run: bool, run_option: str, target: str, *, verified: bool = False
+) -> Lines:
+    """`verified` leaves out "Next: run the tests.", because --verify just ran them."""
+    lines = outcome_lines(result.outcomes)
     counts = f"({_statuses(o.status for o in result.outcomes)})"
     files = ", ".join(result.changed)
     if dry_run:
         done = f"Dry run, would change {files}" if files else "Dry run, no files would change"
-        return [*lines, f"{done} {counts}. Next: {retry}"]
+        return [*lines, f"{done} {counts}. Next: xpt accept{run_option} {target}"]
     done = f"Changed {files}" if files else "No files changed"
+    suspects = [o.group.id for o in result.outcomes if o.status == "suspect" and o.group.id]
     if any(o.status == "stale" for o in result.outcomes):
         return [*lines, f"{done} {counts}. Next: run the tests, then xpt failures."]
+    if suspects:
+        force = f"xpt accept{run_option} --force {' '.join(suspects)}"
+        return [*lines, f"{done} {counts}. Next: fix the code under test, or run {force}."]
+    if verified:
+        return [*lines, f"{done} {counts}."]
     return [*lines, f"{done} {counts}. Next: run the tests."]
 
 
+def rerun_lines(rerun: Rerun) -> Lines:
+    tests = f"the {_count(len(rerun.tests), 'accepted test')}"
+    if rerun.passed is None:
+        return ["Nothing to rerun."]
+    if rerun.passed:
+        return [f"Verified: {tests} {'passes' if len(rerun.tests) == 1 else 'pass'}."]
+    return [
+        *rerun.output.strip("\n").splitlines(),
+        f"Verify failed: pytest exited {rerun.code} on {tests}.",
+    ]
+
+
+def rerun_json(rerun: Rerun) -> dict[str, Json]:
+    return {
+        "tests": list(rerun.tests),
+        "exit_code": rerun.code,
+        "passed": rerun.passed,
+        "output": rerun.output,
+    }
+
+
 def reject_lines(outcomes: Sequence[RejectOutcome]) -> Lines:
-    lines = _outcome_lines(outcomes)
+    lines = outcome_lines(outcomes)
     added = sum(o.status == "rejected" for o in outcomes)
     done = (
         f"Recorded {_count(added, 'rejection')} in .xpt/{FILE}"
@@ -100,7 +131,7 @@ def reject_lines(outcomes: Sequence[RejectOutcome]) -> Lines:
     return [*lines, f"{done} ({counts}). Next: fix the code under test, then run the tests."]
 
 
-def _outcome_lines(outcomes: Sequence[Outcome | RejectOutcome]) -> Lines:
+def outcome_lines(outcomes: Sequence[Outcome | RejectOutcome]) -> Lines:
     lines = []
     for o in outcomes:
         lines.append(heading(o.group.id, o.group.site, o.status))

@@ -131,12 +131,17 @@ def test_a_compared_assert_labels_each_side_instead_of_an_arrow():
     ]
 
 
-def test_the_footer_names_acceptable_ids_only_when_the_run_was_recorded():
+def test_the_block_and_footer_name_the_accept_command_only_when_the_run_was_recorded():
     lines = report_lines(session(failure(detail=Expected(observed())), run="r"), QUIET)
-    assert lines[1] == "  3b78  mismatch"
-    assert lines[-1] == "1 failed in 0.50s. Next: xpt accept 3b78"
+    assert lines[1:] == [
+        "  3b78  mismatch",
+        "  value: 1 -> 2",
+        "  1 changed, 0 unchanged",
+        "  accept: xpt accept 3b78",
+        "1 failed in 0.50s. Next: xpt accept 3b78",
+    ]
     unrecorded = report_lines(session(failure(detail=Expected(observed()))), QUIET)
-    assert unrecorded[-1] == "1 failed in 0.50s."
+    assert unrecorded[-2:] == ["  1 changed, 0 unchanged", "1 failed in 0.50s."]
 
 
 def test_the_footer_points_at_xpt_failures_when_nothing_is_acceptable():

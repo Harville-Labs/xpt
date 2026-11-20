@@ -57,6 +57,7 @@ xpt accept b211 ee17      # these call sites
 xpt accept --missing      # only empty expectations
 xpt accept --all          # every acceptable call site that was not rejected
 xpt accept --dry-run b211 # report what would change, write nothing
+xpt accept --force b211   # also accept a value that looks broken
 ```
 
 `xpt accept` with no ids and no flag does nothing and says so.
@@ -64,6 +65,7 @@ xpt accept --dry-run b211 # report what would change, write nothing
 Accept is careful about what it writes.
 
 - It checks that the expected argument's text still matches the run, and refuses with `stale` if you edited it since. Run the tests again to record a fresh value.
+- It refuses with `suspect` a value that looks like a failure: an exception repr or traceback, `None` where there was data, a collection that became empty, or a new `nan`. The reason names the path and the rule. Pass `--force` with the ids when the value is right. See the [CLI reference](cli.md).
 - Lines added or removed elsewhere in the file don't matter.
 - A second accept of the same value is a no-op and reports `already_accepted`.
 - It rewrites each file once, through a temporary file, under `.xpt/accept.lock`. The new text must compile before it is written.
@@ -83,6 +85,21 @@ A rejection stops matching as soon as a run records a different value at that ca
 ## `pytest --expect-create`
 
 Runs the tests, then fills every missing expectation the way `xpt accept --missing` does. It writes after the session ends, never during it, and never replaces an existing expected value. The run still fails, because the expectations were empty when their tests ran. Run again to see them pass.
+
+## `pytest --expect-accept`
+
+Runs the tests, then accepts the named call sites the way `xpt accept <id>` does. Use it when you already know the ids, or to accept and see the report in one command.
+
+```sh
+pytest --expect-accept=b211,ee17
+pytest --expect-accept=b211 --expect-accept=ee17
+```
+
+Like `--expect-create`, it writes after the session ends, so the run still fails for those tests. The footer names what was written, `Accepted 2 expectations: tests/test_demo.py:18 tests/test_demo.py:22.`, and what was not, `Not accepted: b211 stale.` with the reason on the lines above it. An id that names no failure in this run is reported as `unknown`. The other ids are still accepted.
+
+Ids come from the report, where each acceptable failure ends with `accept: xpt accept <id>`. An id is stable across runs, so an id from the last run works. With `--expect-create` as well, the named call sites are accepted and the other missing expectations are filled.
+
+Both options need the run to be recorded, so they are usage errors with `--expect-no-record` or `XPT_NO_RECORD`.
 
 ## Other commands
 

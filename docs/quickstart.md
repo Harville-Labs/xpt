@@ -8,6 +8,8 @@ This walks through one loop: write a test with no expectation, let xpt fill it, 
 uv add --dev xpt
 ```
 
+If coding agents work in the project, `xpt init` adds xpt's instructions to `AGENTS.md` and checks that pytest loads the plugin. To move existing `assert value == literal` tests to `expect`, run `xpt convert tests --dry-run`, then without `--dry-run`.
+
 ## 2. Write a test without an expected value
 
 ```python title="tests/test_demo.py"
@@ -55,12 +57,13 @@ FAILED tests/test_demo.py::test_summary  tests/test_demo.py:9
   0eae  mismatch
   value["count"]: 3 -> 4
   1 changed, 1 unchanged
+  accept: xpt accept 0eae
 1 failed in 0.04s. Next: xpt accept 0eae
 ```
 
 Now decide.
 
-- The new value is right: `xpt accept 0eae` writes it into the test.
+- The new value is right: `xpt accept 0eae` writes it into the test. `pytest --expect-accept=0eae` does the same after running the tests.
 - The new value is a bug: fix the code, or run `xpt reject 0eae` so xpt stops offering it for acceptance while you work on the fix.
 
 `xpt accept` refuses if the expected argument changed since the run, so it never writes over an edit you made after the run.

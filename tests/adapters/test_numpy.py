@@ -105,3 +105,11 @@ def test_a_tolerance_leaves_integer_arrays_exact():
 def test_a_complex_array_holds_each_part_to_the_tolerance():
     expect(np.array([1.0005 + 2j]), np.array([1 + 2j]), atol=1e-3)
     assert not equal(np.array([1 + 2.1j]), np.array([1 + 2j]), Tolerance(atol=1e-3))
+
+
+def test_unordered_reorders_a_list_of_arrays_but_not_their_elements():
+    expect(
+        [np.array([3, 4]), np.array([1, 2])], [np.array([1, 2]), np.array([3, 4])], unordered=True
+    )
+    with pytest.raises(AssertionError, match=r"expect\(\) mismatch \(unordered\):"):
+        expect([np.array([2, 1])], [np.array([1, 2])], unordered=True)

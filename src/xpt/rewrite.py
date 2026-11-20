@@ -2,23 +2,17 @@ from __future__ import annotations
 
 import ast
 import codecs
-import io
-import re
-import tokenize
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from xpt import layout
+from xpt import layout, pyfile
 from xpt.group import Group
-from xpt.site import Unlocatable, arg_sha, expected_arg, find_call, scopes
+from xpt.site import Unlocatable, arg_sha, expected_arg, find_call, scopes_in
 from xpt.source import display_width, to_source
 from xpt.value import Dataclass, Dict, Ref, Seq, Set, Value
 
-OutcomeStatus = Literal["accepted", "already_accepted", "stale", "skipped"]
-
-_NEWLINE = re.compile(rb"\r\n|\r|\n")
-_UTF_8 = ("utf-8", "utf-8-sig")
+OutcomeStatus = Literal["accepted", "already_accepted", "stale", "skipped", "suspect"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,33 +110,22 @@ def _unless_accepted(outcome: Outcome, reason: str) -> Outcome:
 
 
 def _read(path: str, data: bytes) -> _File | str:
-    try:
-        encoding, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
-    except SyntaxError as error:
-        return f"{path} has an unreadable encoding declaration ({error.msg})."
-    if encoding not in _UTF_8:
-        return f"{path} is encoded as {encoding}. xpt accept writes only UTF-8 files."
-    try:
-        raw = data.decode("utf-8")
-    except UnicodeDecodeError as error:
-        return f"{path} is not valid UTF-8 ({error.reason} at byte {error.start})."
-    text = raw.replace("\r\n", "\n").replace("\r", "\n")
-    found = scopes(path, text)
-    if isinstance(found, SyntaxError):
-        return (
-            f"{path} no longer parses ({found.msg}, line {found.lineno}). Fix it and accept again."
-        )
-    starts = (0, *(m.end() for m in _NEWLINE.finditer(data)))
-    first = _NEWLINE.search(data)
-    newline = first.group().decode("ascii") if first else "\n"
-    comments = tuple(
-        starts[t.start[0] - 1] + len(t.line[: t.start[1]].encode("utf-8"))
-        for t in tokenize.generate_tokens(io.StringIO(text).readline)
-        if t.type == tokenize.COMMENT
-    )
-    tree = ast.parse(text, path)
+    source = pyfile.read(path, data, "accept")
+    if isinstance(source, str):
+        return source
+    tree = source.tree
     imported = frozenset(_module_names(tree))
-    return _File(path, data, text, starts, newline, found, comments, imported, _modules(tree))
+    return _File(
+        path,
+        source.data,
+        source.text,
+        source.starts,
+        source.newline,
+        scopes_in(tree),
+        source.comments,
+        imported,
+        _modules(tree),
+    )
 
 
 def _module_names(tree: ast.Module) -> Iterator[str]:

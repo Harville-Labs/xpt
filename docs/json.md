@@ -69,7 +69,54 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 }
 ```
 
-An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `skipped`, and `reason` says why it wasn't written. `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
+An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).`
+
+With `--verify`, the accept object also has `verify`:
+
+```json
+"verify": {
+  "tests": ["tests/test_demo.py::test_count"],
+  "exit_code": 0,
+  "passed": true,
+  "output": "1 passed in 0.03s.\n"
+}
+```
+
+`tests` are the pytest node ids that were rerun. `exit_code` is pytest's. When nothing was written, `tests` is empty and `exit_code` and `passed` are null, because pytest did not run. `output` is pytest's combined stdout and stderr. `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
+
+## Init
+
+```json
+{
+  "schema_version": 1,
+  "command": "init",
+  "dry_run": false,
+  "path": "AGENTS.md",
+  "status": "created",
+  "note": "",
+  "checks": [
+    {"name": "pytest", "ok": true, "detail": "pytest 9.0.1 in /project/.venv/bin/python"},
+    {"name": "plugin", "ok": true, "detail": "pytest loads xpt's plugin. Configuration: pyproject.toml."}
+  ]
+}
+```
+
+`status` is `created`, `added`, `present`, or `kept`. `note` says why a `kept` block was left alone, and is empty otherwise.
+
+## Convert
+
+```json
+{
+  "schema_version": 1,
+  "command": "convert",
+  "dry_run": false,
+  "converted": [{"path": "tests/test_demo.py", "line": 4}],
+  "skipped": [{"path": "tests/test_demo.py", "line": 9, "reason": "neither side is a literal."}],
+  "changed": ["tests/test_demo.py"]
+}
+```
+
+A skip's `line` is `null` when the whole file was skipped.
 
 ## Runs
 
@@ -94,6 +141,7 @@ An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `ski
   "duration": 0.04,
   "run": "20261119T150800-b910",
   "created": null,
+  "accepted": null,
   "failures": [
     {
       "test": "tests/test_demo.py::test_count",
@@ -115,5 +163,6 @@ An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `ski
 
 - Nothing is truncated. The JSON has every change and the full traceback.
 - `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`.
+- `accepted` is null without `--expect-accept`. With it, `accepted` holds `outcomes` and `changed` in the same form, plus `unknown`, the named ids that matched no failure in the run.
 - An expect failure adds `group` in the same form as `xpt failures --json`.
 - A compared `assert` adds `changes` and `unchanged`, with sides named `left` and `right`.

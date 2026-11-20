@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import shutil
 import sys
 from collections.abc import Callable, Sequence
@@ -10,9 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import decisions, render
+from xpt import convert, decisions, init, render
 from xpt.accept import AcceptError, AcceptResult, accept, lock
-from xpt.group import Group, group, missing
+from xpt.group import Group, group, missing, pick
 from xpt.record import (
     DIRECTORY,
     SCHEMA_VERSION,
@@ -22,6 +23,7 @@ from xpt.record import (
     run_ids,
 )
 from xpt.value import Json
+from xpt.verify import accepted_tests, rerun
 
 
 class UsageError(Exception):
@@ -53,13 +55,12 @@ def _load(root: Path, run: str | None) -> _Run:
 
 
 def _pick(run: _Run, ids: Sequence[str]) -> list[Group]:
-    by_id = {g.id: g for g in run.groups if g.id is not None}
-    unknown = [i for i in ids if i not in by_id]
+    chosen, unknown = pick(run.groups, ids)
     if unknown:
         raise UsageError(
             f"no group {', '.join(unknown)} in run {run.id}. Run xpt failures to list the ids."
         )
-    return [by_id[i] for i in dict.fromkeys(ids)]
+    return chosen
 
 
 def failures(args: argparse.Namespace, root: Path) -> Output:
@@ -90,6 +91,10 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
         )
     if chosen > 1:
         raise UsageError("give ids, --missing, or --all, not more than one.")
+    if args.verify and args.dry_run:
+        raise UsageError(
+            "--verify reruns the tests after writing, so it can't be used with --dry-run."
+        )
     run = _load(root, args.run)
     if args.all:
         groups, target = [g for g in run.groups if not g.rejected], "--all"
@@ -97,17 +102,22 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
         groups, target = missing(run.groups), "--missing"
     else:
         groups, target = _pick(run, args.ids), " ".join(args.ids)
+    if args.force:
+        target += " --force"
     data: dict[str, Json] = {"run": run.id, "dry_run": args.dry_run}
     if not groups:
         empty = render.accept_json(AcceptResult((), ()))
         return Output(0, [f"Nothing to accept in run {run.id}."], data | empty)
-    result = accept(root, groups, dry_run=args.dry_run)
+    result = accept(root, groups, dry_run=args.dry_run, force=args.force)
     written = all(o.status in ("accepted", "already_accepted") for o in result.outcomes)
-    retry = f"xpt accept{run.run_option} {target}"
+    lines = render.accept_lines(result, args.dry_run, run.run_option, target, verified=args.verify)
+    data |= render.accept_json(result)
+    if not args.verify:
+        return Output(0 if written else 1, lines, data)
+    checked = rerun(root, accepted_tests(result.outcomes))
+    code = 0 if written and checked.passed is not False else 1
     return Output(
-        0 if written else 1,
-        render.accept_lines(result, args.dry_run, retry),
-        data | render.accept_json(result),
+        code, lines + render.rerun_lines(checked), data | {"verify": render.rerun_json(checked)}
     )
 
 
@@ -142,6 +152,25 @@ def clean(args: argparse.Namespace, root: Path) -> Output:
     return Output(0, ["Removed .xpt/."], {"removed": True})
 
 
+def init_command(args: argparse.Namespace, root: Path) -> Output:
+    result = init.init(root, init.probe(), os.environ, dry_run=args.dry_run)
+    return Output(
+        0 if all(c.ok for c in result.checks) else 1,
+        init.lines(result, args.dry_run),
+        init.to_json(result, args.dry_run),
+    )
+
+
+def convert_command(args: argparse.Namespace, root: Path) -> Output:
+    result = convert.convert(root, args.paths, dry_run=args.dry_run)
+    retry = " ".join(["xpt convert", *(p.as_posix() for p in args.paths)])
+    return Output(
+        0,
+        convert.lines(result, args.dry_run, retry),
+        convert.to_json(result, args.dry_run),
+    )
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise UsageError(f"{message}. Run {self.prog} --help for usage.")
@@ -155,7 +184,9 @@ def _parser() -> argparse.ArgumentParser:
     picked.add_argument("--run", help="a run id from xpt runs (default: the latest run)")
 
     parser = _Parser(
-        prog="xpt", description="Review, accept, and reject recorded expect() failures."
+        prog="xpt",
+        description="Review, accept, and reject recorded expect() failures, set a project up "
+        "for xpt, and convert assert-equals tests.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -173,10 +204,21 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--all", action="store_true", help="every acceptable call site")
     sub.add_argument("--missing", action="store_true", help="only empty expectations")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub.add_argument(
+        "--force", action="store_true", help="accept values that look broken, such as exceptions"
+    )
+    sub.add_argument(
+        "--verify", action="store_true", help="rerun the tests that observed the accepted sites"
+    )
     sub = add("reject", reject, "record actual values as bugs, never to be offered", picked)
     sub.add_argument("ids", nargs="+", metavar="id")
     add("runs", runs, "list recorded runs")
     add("clean", clean, "delete .xpt/ and every recorded value")
+    sub = add("init", init_command, "add xpt's agent instructions to AGENTS.md and check pytest")
+    sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub = add("convert", convert_command, "rewrite assert x == literal as expect(x, literal)")
+    sub.add_argument("paths", nargs="+", type=Path, metavar="path")
+    sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
     return parser
 
 
@@ -187,7 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = _parser().parse_args(argv)
         output: Output = args.handler(args, args.root)
-    except (UsageError, RecordError, AcceptError) as error:
+    except (UsageError, RecordError, AcceptError, convert.ConvertError, init.InitError) as error:
         print(f"xpt: error: {error}", file=sys.stderr)
         return 2
     if args.json:

@@ -59,7 +59,7 @@ Changing either would be a rewrite of its core, not a pull request. We should st
 The brief was a good starting point. These parts of it change.
 
 1. **Recording is on by default. There is no `--expect-record` flag.** The point is to avoid a second test run. If an agent must rerun with `--expect-record` after a plain `pytest` fails, the flag costs the very run we are trying to save. Every run writes its failed and missing observations to `.xpt/`, which is gitignored. `--expect-no-record` turns this off. The cost is a few kilobytes per failing assertion. The privacy cost is no worse than pytest's own failure output, which already prints the same values. `xpt clean` deletes the directory.
-2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept --missing`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks. A mismatch is never accepted by this flag. Under xdist only the controller writes, after every worker has finished. The exit status is still pytest's, so a run that fills expectations fails, because those tests failed when they ran. `--expect-create` with `--expect-no-record` or `XPT_NO_RECORD` is a usage error, because there would be nothing to fill.
+2. **`pytest --expect-create` does not edit files during the run.** It runs the tests, then applies the recorded `missing` observations through the same code path as `xpt accept --missing`, after the session ends. One rewrite path means one set of safety checks. Test execution and source edits stay separate, as the brief asks. A mismatch is never accepted by this flag. Under xdist only the controller writes, after every worker has finished. The exit status is still pytest's, so a run that fills expectations fails, because those tests failed when they ran. `--expect-create` with `--expect-no-record` or `XPT_NO_RECORD` is a usage error, because there would be nothing to fill. `pytest --expect-accept=ID[,ID...]` follows the same rule for named call sites, through the same path as `xpt accept <id>`. It exists because agents that read only pytest output had to learn a second tool before they could accept, and some read `xpt --help` first. An id that names no group in the run is reported as `unknown` and the others are still written, so one stale id does not block the rest. A named id that was rejected is still accepted, as on the CLI.
 3. **No LibCST.** The prototype in `docs/prototypes/` shows that the standard library is enough. `code.co_positions()` (Python 3.11+) gives the exact span of the running call. `ast` gives the span of each argument. A byte-offset splice replaces only the expected argument, so comments, formatting, and every other line stay untouched. LibCST would add a native wheel and a YAML dependency to rewrite one argument we can already locate exactly. We still parse the result with `compile()` before writing.
 4. **No runtime dependencies.** pytest is optional. `executing` and `asttokens`, which inline-snapshot uses, are not needed on Python 3.11+.
 5. **Python 3.11 is the floor.** 3.10 reached end of life in October 2026, and 3.11 brings `co_positions` and `co_qualname`.
@@ -102,6 +102,13 @@ Observation     # one failed call of expect() in one run
   expected: Value | None  # None when missing or unsupported
   actual: Value | None    # None when unsupported or over the size cap
   detail: str             # "" normally; the UnsupportedValue message, or "too large: N bytes, sha256 <hex>"
+  options: Options        # how the call compared; both values already have ignore and unordered applied
+  key: Value | None       # the case's key= value, None for an unkeyed call
+
+Options         # the comparison keywords of one expect() call
+  tolerance: Tolerance    # atol and rtol
+  ignore: [path]          # dict entries removed from both values, parsed from strings like 'value["id"]'
+  unordered: bool         # lists and tuples sorted and compared as multisets
 
 Group           # every failed observation of one call site in a run, built at read time
   id: str | None          # short display id, None for an unlocatable site
@@ -112,12 +119,13 @@ Group           # every failed observation of one call site in a run, built at r
   tests: [str]            # every test that reached the site
   detail: str             # why the group cannot be accepted, "" when it can
   rejected: bool          # its one actual value matches a Rejection in decisions.jsonl
+  options: Options        # the first observation's, used for every diff of the group
   acceptable              # derived: status is missing or mismatch
   offered                 # derived: acceptable and not rejected; what footers suggest
 
 Outcome         # what accept did with one group
   group: Group
-  status: "accepted" | "already_accepted" | "stale" | "skipped"
+  status: "accepted" | "already_accepted" | "stale" | "skipped" | "suspect"
   reason: str             # why it was not written, "" when accepted or already accepted
 
 AcceptResult
@@ -140,7 +148,7 @@ Change
   actual: Value | None
 ```
 
-An observation stores no diff and no id. Readers derive both: `diff(expected, actual)` gives the changes, and `site_id(site)` gives the id. One copy of each rule means a stored diff can never disagree with the values it came from. `conflict` is not recorded either. It is the status of a group of observations whose values differ (see Conflicting observations).
+An observation stores no diff and no id. Readers derive both: `options.diff(expected, actual)` gives the changes, and `site_id(site)` gives the id. One copy of each rule means a stored diff can never disagree with the values it came from. `conflict` is not recorded either. It is the status of a group of observations whose values differ (see Conflicting observations).
 
 A passing assertion writes nothing. Run state lives on disk as records. In memory there is only the open file handle.
 
@@ -166,7 +174,8 @@ We do not hash the whole file. A whole-file hash would refuse every accept after
 One call site can run many times: in a loop, in a parametrized test, from a helper. The records for one site are grouped at read time.
 
 - If every observation has the same value, it is a single change.
-- If the values differ, the status is `conflict`. Accept refuses and lists the distinct values with their test ids. The fix is a separate `expect()` per case, or `expect(value, expected, key=param)` in a later milestone.
+- If the values differ, the status is `conflict`. Accept refuses and lists the distinct values with their test ids. The fix is a separate `expect()` per case, or `expect(value, {param: expected, ...}, key=param)`.
+- With `key=`, every observation stores the whole expected dict and, as its actual value, that dict with its own case replaced. Grouping merges them: the group's actual value is the expected dict with every failing case's entry set. Cases that passed record nothing, so their entries come through unchanged from the expected dict. The group is `missing` when every failing case had no entry, and `mismatch` otherwise. Two calls with the same key and different values conflict, and so does a site that mixes keyed and unkeyed calls.
 - Values are equal when `norm` says so, the same equality `diff` uses, so `1` and `1.0` agree.
 - Calls that disagree on `arg_sha` are a conflict too, because the file changed during the run. So are calls with equal actual values but different expected values, which happens when the expected argument depends on a parameter.
 - If any call recorded no actual value (unsupported, or over the size cap), the group is `unsupported` and cannot be accepted.
@@ -183,13 +192,14 @@ pytest run
   expect(actual, expected?)
     compare -> pass: nothing written
             -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
-  session end: with --expect-create, accept the run's missing groups (as xpt accept --missing)
+  session end: with --expect-accept, accept the named groups (as xpt accept <id>)
+               with --expect-create, accept the run's other missing groups (as xpt accept --missing)
                one block per failure, a one-line footer with the next command, pytest's exit code
 
 xpt failures                every group of the latest run, each with its diff
 xpt show <id>               one group with its function and tests, paths only, with limits
 xpt show <id> --full        no limits, plus both whole values
-xpt accept <id>... [--dry-run]
+xpt accept <id>... [--dry-run] [--force] [--verify]
 xpt accept --missing        fill every missing expectation, nothing else
 xpt accept --all            every group not rejected; those that cannot be accepted are reported with their reason
 xpt runs                    the recorded runs, newest first
@@ -202,7 +212,7 @@ Every command takes `--json`, and `--root PATH` for a project other than the cur
 Exit codes:
 
 - `0`: the command did what it was asked, or there is nothing to do.
-- `1`: `failures` found failures, or `accept` or `reject` left a requested group stale or skipped.
+- `1`: `failures` found failures, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
 - `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record or decision, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
 
 Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. It moves to `rejected` when `xpt reject` records its actual value as a bug.
@@ -228,6 +238,25 @@ A rejection is one line in `.xpt/decisions.jsonl`:
 
 `accept` without arguments does nothing and says so. Replacing existing expectations needs ids or `--all`. `--missing` fills only empty expectations, because creating one does not overwrite a reviewed value. The design first named the bulk flag `--all-mismatches` so that typing it would be deliberate. `--all` is just as explicit, also fills missing values, and is the flag agents reach for. `xpt failures` prints every diff before the footer suggests an accept, so the change is on screen when it is accepted.
 
+### Verifying an accept
+
+Agents in the benchmark ran the whole suite again after every accept, two to four pytest runs per task. `xpt accept --verify` reruns only the tests whose node ids the run record holds for the groups now `accepted` or `already_accepted`. It runs `sys.executable -m pytest <ids>` from the project root, after the accept lock is released, so the rerun can record. That rerun becomes the latest run, which is what an agent wants to read next. pytest's exit code decides: a nonzero code makes accept exit `1` and prints pytest's output. When nothing was written there is nothing to rerun, and no process starts. `--verify` with `--dry-run` is a usage error, because nothing would be written to verify.
+
+A test that observed the call site may also fail for a reason the accept did not touch. That is still a failure to report, because the agent asked whether its tests pass now.
+
+### Suspect values
+
+Wrong accepts are the main risk of snapshot tests for agents, and the worst ones are values that are plainly failures: the code returned an error string or `None` and the agent accepted it to make the test pass. Accept refuses an actual value with the outcome `suspect` when one of these rules matches, unless `--force` (or `force=True`) is given:
+
+- `exception`: a string that is an exception repr (`ValueError('bad')`), an exception line (`KeyError: 'id'`), or holds a traceback, where the expected value at that path was not one too.
+- `none`: `None` where the expected value held anything else.
+- `empty`: an empty list, tuple, set, or dict where the expected value had items.
+- `nan`: `nan` where the expected value was a finite number.
+
+`xpt.suspect.suspect(expected, actual)` walks the two `Value` trees together, matching list items by index, dict entries by key, and fields by name, and returns the first match's path and rule. It is pure, so the CLI, `--all`, `--missing`, and `pytest --expect-create` share it through `accept`. A missing expectation has no expected value, so only the `exception` rule applies. The reason names the path and rule, such as `value["items"] is empty where the expected value had items (rule: empty).`, and the footer names the `--force` command for those ids. The check runs before the file is read, so a dry run reports it too.
+
+The rules are narrow on purpose. A false refusal costs one `--force`. A rule that fires on ordinary changes would teach agents to pass `--force` every time.
+
 ## Persistence
 
 ```
@@ -241,7 +270,7 @@ A rejection is one line in `.xpt/decisions.jsonl`:
 - Each pytest process, controller or xdist worker, appends to its own file. Nothing is shared, so nothing is locked. This follows "separate before serializing shared state."
 - The controller writes `latest` at session end with `os.replace`, so a crashed run never becomes the latest.
 - Old runs are pruned to the last 5 by default.
-- Each line is one JSON object with `"schema_version": 1`. A value that is absent (`expected` when missing) is left out of the object, so a recorded `None` stays distinct from no value. `atol` and `rtol` appear only when they are not 0. Reading a run validates every line and names the file and line of a malformed one.
+- Each line is one JSON object with `"schema_version": 1`. A value that is absent (`expected` when missing) is left out of the object, so a recorded `None` stays distinct from no value. `atol` and `rtol` appear only when they are not 0, `ignore` (a list of path strings) only when set, `unordered` only when true, and `key` (a recorded value) only for a keyed call. Reading a run validates every line and names the file and line of a malformed one.
 - A process with no driver, such as plain unittest or a script, records under the current directory and writes `latest` from an `atexit` hook. Under xdist, the controller hands its run id to each worker.
 - A record over 1 MB keeps its status and site but drops both values. Its detail holds the record's size and the sha256 of the value.
 - `XPT_NO_RECORD` set to any non-empty value turns recording off, like `--expect-no-record`.
@@ -260,6 +289,16 @@ A rejection is one line in `.xpt/decisions.jsonl`:
 - Groups that are not acceptable are skipped with their `detail`, without reading the file.
 
 SQLite would buy queries we do not need. It would also make concurrent writers our problem. JSON Lines is readable with `jq` and easy to delete.
+
+## Setup and migration commands
+
+`xpt init` and `xpt convert` lower the cost of starting with xpt, for a person or an agent.
+
+- **One copy of the agent instructions.** The text lives in `src/xpt/instructions.md`, shipped in the wheel. A test checks that the block in `docs/agents.md` matches it byte for byte.
+- **`init` is idempotent.** The block sits between `<!-- xpt:begin -->` and `<!-- xpt:end -->`. A second run finds it and writes nothing. A block someone edited is theirs: init reports it and never overwrites it. A heading-only match catches a block pasted by hand before markers existed.
+- **`init` checks what it can see without running pytest.** It reads the installed pytest version and the `pytest11` entry point from the interpreter running xpt, and `addopts` from the configuration file pytest would pick and from the environment. Starting a pytest session would collect the project's tests, which can be slow or have side effects.
+- **`convert` is conservative.** It uses only `ast` and byte offsets, the same splice approach as accept. Each edit is checked by parsing `expect(a, b)` from the new text and comparing its arguments' AST with the original operands, and the whole file must compile afterward. Anything that could change meaning is skipped with a reason, not guessed at. Float literals are skipped because `==` is exact on floats while a converted test invites `atol=`; the person converting decides.
+- **`convert` takes no lock.** It writes only test files given on the command line, never `.xpt/`, so it does not create `.xpt/` as a side effect.
 
 ## Serialization, comparison, and source generation
 
@@ -287,6 +326,16 @@ Arrays over 10,000 elements are written as `expect.digest(...)`, the same kind o
 
 Acceptance never runs code from the record. It builds source text from the `Value` tree. It never calls `eval`, `pickle`, or the observed object's `__repr__`.
 
+## Comparison options
+
+`ignore=`, `unordered=`, and `key=` let an agent keep volatile or order-free data out of an expectation without hand-editing the recorded value. `xpt.options.Options` holds `ignore`, `unordered`, and the tolerance for one call, and `options()` parses the keyword arguments where they enter.
+
+- **Ignore paths are diff paths.** A path is a string written exactly as a diff prints it, rooted at `value`: `'value["created"]'`, `'value.user["id"]'`, `'value["rows"][...]["id"]'`. We chose this over dotted strings and tuples. An agent reading a failure can paste the path from the diff line, with no translation step to get wrong. Dotted strings cannot tell the key `"0"` from the index `0`, or hold a key with a dot in it. Tuples are unambiguous but appear nowhere in xpt's output. Paths parse with `ast` and `ast.literal_eval`, so the key syntax is Python's and nothing is evaluated. `[...]` is the one addition, a wildcard over list items and dict values.
+- **Ignore removes dict entries only.** Removing a list item would shift every later index, and removing a dataclass or model field would leave xpt unable to write the constructor. Both are refused with the alternative. Because the entries are gone before the value is recorded, the stored values, the diff, grouping, rejection hashes, and the accepted source all agree, and none of them needs to know about `ignore`.
+- **Unordered sorts before comparing.** Every list and tuple is sorted by its canonical JSON, recursively, except inside arrays, tensors, pandas objects, and digests, whose order is their data. Sorting once makes accepted source stable. The diff still matches items as a multiset, so one inserted item reports one `add` instead of a shifted tail, and an item within the tolerance matches.
+- **The pass check stays `==` first.** A call returns as soon as `equal` passes, so options cost nothing on the passing path. Only a failing call serializes, applies the options, and compares again.
+- **Key keeps identity unchanged.** A keyed call site is still one site with one expected argument, so `arg_sha`, stale detection, and rewrite work as before. Each case is an entry in that argument's dict, and grouping merges the cases into one value (see Conflicting observations). Splitting one site into several identities per key would have needed a key in `SiteKey`, a key-aware rewrite, and per-key fingerprints, for no gain to the reviewer, who still edits one dict.
+
 ## Reporting
 
 When xpt is installed, it replaces pytest's terminal output. Agents read every byte of a test run, and pytest's header, progress dots, rules, and full tracebacks spend tokens without saying more. The report stays readable for people, so it is the default. `--xpt-report=pytest`, or `XPT_REPORT=pytest`, keeps pytest's own output.
@@ -297,6 +346,7 @@ FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
   a81f  mismatch
   value.operator: "addition" -> "subtraction"
   1 changed, 42 unchanged
+  accept: xpt accept a81f
 FAILED tests/test_api.py::test_totals  tests/test_api.py:30
   > assert totals(order) == {"total": 42, "items": 3, "tax": 0, "due": 42}
   value["total"]: left 41, right 42
@@ -315,17 +365,17 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 ```
 
 - Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. When the error is raised in a helper, the header shows the chain of project frames from the test down instead, as `path:line > path:line function`, keeping the first frame and the three nearest the error. The test's own name is left out because the node id has it. The next line is the source line at the deepest frame, after `> `. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
-- An `expect()` failure shows its short id, its status, and the path diff.
+- An `expect()` failure shows its short id, its status, and the path diff. A group that is offered, recorded, and not written by this session ends with `accept: xpt accept <id>`. The footer already names every id, but an agent reading one block should not have to match ids against the footer to act on the diff it just read. The line and the footer's `Next:` come from the same set of pending groups, so they cannot disagree. Rejected, conflicting, and just-accepted groups get no line.
 - A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars, unsupported values, and other operators keep pytest's explanation.
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
 - Parametrized cases that fail at the same line with the same kind of error fold into the first case. Each other case gets an `also fails:` line with its full node id, which can be pasted into a pytest command, and the first detail line where it differs from the first case, without the shared exception type. The default limit of 10 applies, and the rest are counted.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
-- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`, and `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same `Filled` line prints after pytest's summary.
+- The footer is pytest's counts, warnings included, and duration, plus `Next: xpt accept <ids>` when recorded expect failures can be accepted and were not rejected, or `Next: xpt failures` when none can. With `--expect-create`, it first says `Filled N missing expectations: path:line ...`. With `--expect-accept`, it says `Accepted N expectations: path:line ...` and `Not accepted: <id> <status>, ...` for named ids that were stale, skipped, or unknown, and the lines just above the footer give each reason. `Next:` covers only what was not written. When every expect failure was written, it says `Next: run the tests.` With `--xpt-report=pytest`, the same lines print after pytest's summary.
 - `-v` raises the limits to 50 changes, 400 characters per value, 20 output lines, and 1000 characters per message. `-vv` lifts them and adds pytest's traceback. `-q` prints the same compact report.
 - `-v` and `-vv` also keep pytest's line per test. `-r` with anything but the default `fE` keeps pytest's short summary beside the report, and `-rP`/`-rA` keep its PASSES section. `--no-summary` prints only the footer. `--no-header` and `-q` drop the plugin header lines.
 - Everything else pytest prints still prints: the warnings summary, plugin header lines and terminal summaries, `--durations`, `-x` stops, keyboard interrupts, interrupted collection, `--lf` messages, `--setup-show`, live logs, the debugger, and xdist's worker status lines. Exit codes are pytest's. Under xdist the controller prints one report.
 - `--tb` other than `auto`, `-l`, and `--full-trace` ask for pytest's failure sections, so those runs keep pytest's report. So do runs that don't run tests: `--co`, `--fixtures`, `--fixtures-per-test`, `--markers`, `--setup-only`, `--setup-plan`, `--help`, and `--version`. `--xpt-json` with one of these is a usage error, because there is no xpt report to write.
-- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`. A compared assert's changes name their sides `left` and `right`, as the text does. `op` reads from left to right, so `add` is a value only the right side has.
+- `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, `accepted`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. `accepted` is the same for `--expect-accept`, plus `unknown`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`. A compared assert's changes name their sides `left` and `right`, as the text does. `op` reads from left to right, so `add` is a value only the right side has.
 
 The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
 
@@ -360,16 +410,16 @@ Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, becaus
 
 ## Concurrency
 
-- xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` runs in the controller's `pytest_sessionfinish`, after every worker has finished.
+- xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` and `--expect-accept` run in the controller's `pytest_sessionfinish`, after every worker has finished.
 - Two pytest sessions at once in one project each get their own run directory. `latest` names whichever finished last. That is acceptable, and `--run <id>` selects another.
 - Accept while pytest runs: accept creates `.xpt/accept.lock` with `O_CREAT | O_EXCL`, which behaves the same on POSIX and Windows, and deletes it when done. A second accept fails with a message naming the lock file. A crash can leave the file behind, so the message says to delete it if no accept is running. A test run racing an accept is caught by the fingerprint check on the next accept. `reject` and `clean` take the same lock, so the error says another xpt command is writing to `.xpt/`.
 
 ## Risks
 
-- **Rubber-stamping.** The tool makes accepting cheap, so agents will accept regressions. Mitigations: no bulk accept by default, the diff shown at accept time, and `--dry-run`. The benchmark (M5) measures how often wrong accepts happen. We do not claim to prevent them.
+- **Rubber-stamping.** The tool makes accepting cheap, so agents will accept regressions. Mitigations: no bulk accept by default, the diff shown at accept time, `--dry-run`, and refusing suspect values without `--force`. The benchmark (M5) measures how often wrong accepts happen. We do not claim to prevent them.
 - **Dynamic call sites.** `expect` called through a helper reports the helper's frame. We support `expect(..., _depth=1)` the way expecttest supports `skip`. A call created through `functools.partial` or `exec` has no source to rewrite. We record it as unsupported for rewriting, and the comparison still runs.
 - **Generated or non-file sources** (doctests, notebooks, `python -c`): same as above.
-- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets. `ignore=` and adapters cover the rest. Default `repr` of arbitrary objects is never used, because it embeds addresses.
+- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets, `unordered=` covers lists, `ignore=` covers volatile dict entries, and adapters cover the rest. Default `repr` of arbitrary objects is never used, because it embeds addresses.
 - **Large values.** Records are capped at 1 MB per observation by default. Larger values are recorded as a hash plus a summary and cannot be inline-accepted.
 - **Sensitive data.** `.xpt/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `xpt clean`. The README says so plainly.
 - **Python 3.11 floor** excludes 3.10 users. 3.10 is end of life, so this is acceptable.
@@ -384,9 +434,9 @@ expect(actual)  # missing: fails, records
 expect(actual, expected)  # compares with ==, records on mismatch
 ```
 
-Later, as keyword-only arguments: `ignore=`, `unordered=`, `key=`. These stay in the source, so a reviewer can see them.
+Keyword-only arguments change how a call compares: `atol=`, `rtol=`, `ignore=`, `unordered=`, and `key=`. They stay in the source, so a reviewer can see them, and they are recorded with each observation, so review and accept compare the same way the test did.
 
-pytest plugin options: `--expect-create`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 
@@ -395,7 +445,8 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M0. Scaffold.** uv, ruff, ty, pytest, CI on 3.11 to 3.14, MIT license.
 - **M1. Core assertion.** `Value`, `serialize`, `diff`, `to_source` for builtins and dataclasses. `expect()` compares and raises with the compact message. No recording yet.
 - **M2. Record and accept.** Call-site identity, JSON Lines recorder, `failures` / `show` / `accept` / `reject` / `clean`, fingerprint checks, atomic multi-edit writes, `--expect-create`. This is the differentiator and the MVP line.
-- **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests.
+- **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests. The comparison options are done.
 - **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic, attrs, and protobuf adapters are done. Tolerances (`atol=`, `rtol=`) are done. Large-array digests and mismatch counts are done. An xdist test matrix remains.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
+- **Setup and migration.** `xpt init` and `xpt convert` are done.
 - **M6. Release.** Name check, docs, PyPI.

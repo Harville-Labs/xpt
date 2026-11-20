@@ -18,6 +18,7 @@ FAILED tests/test_parser.py::test_parser  tests/test_parser.py:14
   a81f  mismatch
   value.operator: "addition" -> "subtraction"
   1 changed, 42 unchanged
+  accept: xpt accept a81f
 1 failed, 12 passed in 0.31s. Next: xpt accept a81f
 ```
 
@@ -37,6 +38,13 @@ xpt runs              # recorded runs, newest first
 xpt clean             # delete .xpt/
 ```
 
+Two commands help a project start:
+
+```sh
+xpt init              # add xpt's instructions to AGENTS.md and check pytest loads the plugin
+xpt convert tests     # rewrite assert x == literal as expect(x, literal)
+```
+
 `pytest --expect-create` runs the tests, then fills every missing expectation the same way `xpt accept --missing` does. It writes after the session ends, never during it, and never replaces an existing expected value. The footer names what it wrote and suggests `xpt accept` only for what remains:
 
 ```
@@ -44,6 +52,8 @@ xpt clean             # delete .xpt/
 ```
 
 The run still fails, because the filled expectations were empty when their tests ran. Run the tests again to see them pass.
+
+`pytest --expect-accept=a81f,3526` does the same for named call sites, as `xpt accept a81f 3526` would. Each acceptable failure in the report ends with its `accept:` command, so the id is on screen beside its diff.
 
 `xpt accept` writes without running the tests again, and refuses if that source changed since the run. `xpt reject` records in `.xpt/decisions.jsonl` that a call site's actual value is a real bug. `xpt failures` and the pytest footer then mark that call site `rejected` and stop suggesting it, until a run records a different value there. Every command takes `--json`. Exit codes are 0 for done or nothing to do, 1 when failures remain or an accept or reject was refused, and 2 for a usage error. `python -m xpt` works too, and `xpt.api` is the same surface for tools.
 

@@ -65,7 +65,7 @@ The next run passes.
 
 - [Quickstart](quickstart.md) walks through the loop from install to a passing run.
 - [expect()](expect.md) covers what values xpt can record and compare.
-- [Reviewing failures](review.md) covers `failures`, `show`, `accept`, `reject`, and `--expect-create`.
+- [Reviewing failures](review.md) covers `failures`, `show`, `accept`, `reject`, `--expect-create`, and `--expect-accept`.
 - [Coding agents](agents.md) has a snippet to paste into your `AGENTS.md`.
 - [Design](design.md) explains why xpt works the way it does.
 

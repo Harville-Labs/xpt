@@ -40,6 +40,7 @@ class Sweep:
     words: list[str]
     timeout: int
     keep: bool
+    codex_home: Path | None
 
 
 def plan(
@@ -92,6 +93,9 @@ def execute(job: Job, sweep: Sweep) -> Run:
     logs.mkdir(parents=True, exist_ok=True)
     base = Run(job.id, job.task.name, job.variant.name, job.agent.label, job.rep)
     env = workspace.clean_env(sweep.cache, job.variant.env)
+    if job.agent.kind == "codex":
+        assert sweep.codex_home is not None, "a sweep with Codex agents needs codex_home"
+        env["CODEX_HOME"] = str(sweep.codex_home)
     project = None
     try:
         project = workspace.prepare(

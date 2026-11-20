@@ -1,5 +1,6 @@
 import difflib
 import json
+import os
 import random
 import subprocess
 import tempfile
@@ -9,6 +10,7 @@ from pathlib import Path
 from xpt_bench.catalog import Task
 from xpt_bench.report import JUDGE_FILE
 from xpt_bench.runs import Run
+from xpt_bench.workspace import codex_home
 
 KEY_FILE = "judge-key.json"
 SCHEMA = {
@@ -128,7 +130,7 @@ def parse_scores(text: str, labels: list[str]) -> list[Score]:
     return [s for s in scores if s.label in labels]
 
 
-def ask_codex(prompt: str, model: str | None, logs: Path) -> str:
+def ask_codex(prompt: str, model: str | None, logs: Path, codex: Path) -> str:
     with tempfile.TemporaryDirectory() as tmp:
         schema = Path(tmp) / "schema.json"
         schema.write_text(json.dumps(SCHEMA))
@@ -138,7 +140,10 @@ def ask_codex(prompt: str, model: str | None, logs: Path) -> str:
         cmd = ["codex", "exec", "--json", "-C", str(workdir), "--sandbox", "read-only"]
         cmd += ["--skip-git-repo-check", "--ignore-user-config", "--output-schema", str(schema)]
         cmd += ["-o", str(reply), *(["-m", model] if model else []), "-"]
-        done = subprocess.run(cmd, input=prompt, capture_output=True, text=True, check=False)
+        env = {**os.environ, "CODEX_HOME": str(codex_home(Path(tmp), codex))}
+        done = subprocess.run(
+            cmd, input=prompt, capture_output=True, text=True, check=False, env=env
+        )
         logs.write_text(done.stdout + done.stderr)
         if done.returncode != 0 or not reply.is_file():
             raise JudgeError(f"codex exited {done.returncode}. Its output is in {logs}.")
@@ -152,6 +157,7 @@ def judge(
     rubric: str,
     model: str | None,
     seed: int,
+    codex: Path,
 ) -> list[dict]:
     rows, key = [], {}
     logs = results / "judge"
@@ -162,7 +168,7 @@ def judge(
         entries = blind(task_runs, diffs, seed)
         prompt = build_prompt(rubric, reference_diff(tasks[name]), entries)
         (logs / f"{name}.prompt.md").write_text(prompt)
-        reply = ask_codex(prompt, model, logs / f"{name}.jsonl")
+        reply = ask_codex(prompt, model, logs / f"{name}.jsonl", codex)
         by_label = {s.label: s for s in parse_scores(reply, [e.label for e in entries])}
         for entry in entries:
             score = by_label[entry.label]

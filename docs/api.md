@@ -28,7 +28,7 @@ for outcome in result.outcomes:
 
 | Function | Effect |
 |---|---|
-| `accept(root, groups, *, dry_run=False)` | Writes each acceptable group's actual value into its source. Returns `AcceptResult(outcomes, changed)`. Raises `AcceptError` when `.xpt/accept.lock` is held. |
+| `accept(root, groups, *, dry_run=False, force=False)` | Writes each acceptable group's actual value into its source. Refuses a value that looks broken with the outcome `suspect` unless `force` is true. Returns `AcceptResult(outcomes, changed)`. Raises `AcceptError` when `.xpt/accept.lock` is held. |
 | `reject(root, run, groups)` | Records each group's actual value as a bug. Returns a tuple of `RejectOutcome`. |
 | `load_rejections(root)` | The recorded rejections, as a frozenset of `Rejection`. |
 | `mark(groups, rejections)` | The groups with `rejected` set. Pure. |
@@ -52,7 +52,7 @@ for outcome in result.outcomes:
 | `CallSite` | `path`, `qualname`, `callee`, `ordinal`, `arg_sha`, `line` |
 | `Unlocatable` | `reason`, `path`, `line` |
 | `Outcome` | `group`, `status`, `reason` |
-| `OutcomeStatus` | `"accepted"`, `"already_accepted"`, `"stale"`, `"skipped"` |
+| `OutcomeStatus` | `"accepted"`, `"already_accepted"`, `"stale"`, `"skipped"`, `"suspect"` |
 | `RejectOutcome` | `group`, `status`, `reason` |
 | `RejectStatus` | `"rejected"`, `"already_rejected"`, `"skipped"` |
 | `Value` | The recorded value tree. |

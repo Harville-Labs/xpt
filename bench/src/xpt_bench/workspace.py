@@ -65,6 +65,25 @@ def clean_env(cache: Path, extra: dict[str, str] | None = None) -> dict[str, str
     return env
 
 
+def codex_home(dest: Path, source: Path) -> Path:
+    """A Codex home that holds only the login, so a run never sees the user's AGENTS.md or memories.
+
+    `--ignore-user-config` skips `config.toml` but still loads `$CODEX_HOME/AGENTS.md`. The
+    login is linked, not copied, so a token refresh during a run updates the user's own file.
+    """
+    auth = source / "auth.json"
+    if not auth.is_file():
+        raise WorkspaceError(
+            f"{auth} not found. Run `codex login`, or set CODEX_HOME to its directory."
+        )
+    home = dest / "codex-home"
+    home.mkdir(parents=True, exist_ok=True)
+    link = home / "auth.json"
+    if not link.is_symlink():
+        link.symlink_to(auth)
+    return home
+
+
 def _run(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> str:
     done = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False)
     if done.returncode != 0:

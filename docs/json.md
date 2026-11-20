@@ -71,6 +71,25 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 
 An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, or `skipped`, and `reason` says why it wasn't written. `xpt reject --json` has the same `outcomes`, with `rejected`, `already_rejected`, or `skipped`, and no `changed`.
 
+## Init
+
+```json
+{
+  "schema_version": 1,
+  "command": "init",
+  "dry_run": false,
+  "path": "AGENTS.md",
+  "status": "created",
+  "note": "",
+  "checks": [
+    {"name": "pytest", "ok": true, "detail": "pytest 9.0.1 in /project/.venv/bin/python"},
+    {"name": "plugin", "ok": true, "detail": "pytest loads xpt's plugin. Configuration: pyproject.toml."}
+  ]
+}
+```
+
+`status` is `created`, `added`, `present`, or `kept`. `note` says why a `kept` block was left alone, and is empty otherwise.
+
 ## Runs
 
 ```json

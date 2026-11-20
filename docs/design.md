@@ -261,6 +261,14 @@ A rejection is one line in `.xpt/decisions.jsonl`:
 
 SQLite would buy queries we do not need. It would also make concurrent writers our problem. JSON Lines is readable with `jq` and easy to delete.
 
+## Setup commands
+
+`xpt init` lowers the cost of starting with xpt, for a person or an agent.
+
+- **One copy of the agent instructions.** The text lives in `src/xpt/instructions.md`, shipped in the wheel. A test checks that the block in `docs/agents.md` matches it byte for byte.
+- **`init` is idempotent.** The block sits between `<!-- xpt:begin -->` and `<!-- xpt:end -->`. A second run finds it and writes nothing. A block someone edited is theirs: init reports it and never overwrites it. A heading-only match catches a block pasted by hand before markers existed.
+- **`init` checks what it can see without running pytest.** It reads the installed pytest version and the `pytest11` entry point from the interpreter running xpt, and `addopts` from the configuration file pytest would pick and from the environment. Starting a pytest session would collect the project's tests, which can be slow or have side effects.
+
 ## Serialization, comparison, and source generation
 
 These are separate functions over the `Value` tree:
@@ -398,4 +406,5 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M3. Reporting polish and comparison options.** pytest longrepr replacement, limits, `ignore=`, `unordered=`, `key=` for parametrized tests.
 - **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic, attrs, and protobuf adapters are done. Tolerances (`atol=`, `rtol=`) are done. Large-array digests and mismatch counts are done. An xdist test matrix remains.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
+- **Setup.** `xpt init` is done.
 - **M6. Release.** Name check, docs, PyPI.

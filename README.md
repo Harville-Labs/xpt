@@ -37,6 +37,12 @@ xpt runs              # recorded runs, newest first
 xpt clean             # delete .xpt/
 ```
 
+One command helps a project start:
+
+```sh
+xpt init              # add xpt's instructions to AGENTS.md and check pytest loads the plugin
+```
+
 `pytest --expect-create` runs the tests, then fills every missing expectation the same way `xpt accept --missing` does. It writes after the session ends, never during it, and never replaces an existing expected value. The footer names what it wrote and suggests `xpt accept` only for what remains:
 
 ```

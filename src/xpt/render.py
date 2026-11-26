@@ -10,7 +10,7 @@ from xpt.diff import Change, Diff
 from xpt.flaky import Volatile
 from xpt.group import Group
 from xpt.path import format_path
-from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
+from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, line_diff, show
 from xpt.rewrite import Outcome
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Json, to_json
@@ -332,6 +332,8 @@ def change_json(c: Change, *, labeled: bool = False) -> dict[str, Json]:
         data[first] = to_json(c.expected)
     if c.actual is not None:
         data[second] = to_json(c.actual)
+    if (lines := line_diff(c)) is not None:
+        data["lines"] = lines
     return data
 
 

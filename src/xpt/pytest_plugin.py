@@ -214,7 +214,7 @@ def pytest_assertrepr_compare(
     except UnsupportedValue:
         return None
     found = diff(a, b)
-    if all(not c.path for c in found.changes):
+    if all(not c.path and report.line_diff(c) is None for c in found.changes):
         return None
     config.stash[_COMPARED] = (a, b)
     lim = limits(config.get_verbosity())

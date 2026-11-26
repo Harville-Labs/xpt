@@ -53,8 +53,13 @@ def test_long_values_are_cut_to_eighty_characters_with_their_length():
     assert line == '  value: "y" -> "' + "x" * 79 + "... (202 chars)"
 
 
-def test_multiline_text_stays_on_one_line_in_the_report():
-    assert failure("a\nb", "a").splitlines()[1] == '  value: "a" -> "a\\nb"'
+def test_multiline_text_is_reported_as_a_line_diff():
+    assert failure("a\nb", "a").splitlines()[1:5] == [
+        "  value: lines differ, - expected + actual",
+        "    @@ -1 +1,2 @@",
+        "     a",
+        "    +b",
+    ]
 
 
 def test_a_failing_expect_fails_under_plain_unittest(tmp_path: Path):

@@ -13,7 +13,7 @@ from xpt.flaky import mark as mark_flaky
 from xpt.frames import keep
 from xpt.group import Group, group
 from xpt.render import accept_json, change_json, flaky_lines, group_json, outcome_lines
-from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
+from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, head, show
 from xpt.rewrite import Outcome
 from xpt.site import CallSite, SiteKey, Unlocatable
 from xpt.value import Json
@@ -294,7 +294,7 @@ def raised_lines(r: Raised, lim: Limits) -> Lines:
         return [f"  {cut(f'{r.type}: {message}' if message else r.type, lim.message)}"]
     first, *rest = r.message.splitlines() or [""]
     lines = [f"AssertionError: {first}" if first else "AssertionError", *rest]
-    return [f"  {cut(line, lim.message)}" for line in _head(lines, lim.changes)]
+    return [f"  {cut(line, lim.message)}" for line in head(lines, lim.changes)]
 
 
 def _text(text: str, lim: Limits) -> Lines:
@@ -302,12 +302,6 @@ def _text(text: str, lim: Limits) -> Lines:
     errors = [line for line in lines if line.startswith("E ")]
     shown = errors or _tail(text, lim.changes)
     return [f"  {cut(line, lim.message)}" for line in shown]
-
-
-def _head(lines: Sequence[str], limit: int | None) -> list[str]:
-    if limit is None or len(lines) <= limit:
-        return list(lines)
-    return [*lines[:limit], f"... {len(lines) - limit} more lines"]
 
 
 def _tail(text: str, limit: int | None) -> list[str]:

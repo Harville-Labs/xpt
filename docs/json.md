@@ -100,11 +100,12 @@ With `--verify`, the accept object also has `verify`:
   "checks": [
     {"name": "pytest", "ok": true, "detail": "pytest 9.0.1 in /project/.venv/bin/python"},
     {"name": "plugin", "ok": true, "detail": "pytest loads xpt's plugin. Configuration: pyproject.toml."}
-  ]
+  ],
+  "mcp": {"path": ".mcp.json", "status": "added", "note": ""}
 }
 ```
 
-`status` is `created`, `added`, `present`, or `kept`. `note` says why a `kept` block was left alone, and is empty otherwise.
+`status` is `created`, `added`, `present`, or `kept`. `note` says why a `kept` block was left alone, and is empty otherwise. `mcp` reports `.mcp.json` the same way with `--mcp`, and is null without it.
 
 ## Convert
 

@@ -4,6 +4,7 @@ import codecs
 import configparser
 import importlib.metadata
 import importlib.resources
+import json
 import re
 import shlex
 import sys
@@ -23,6 +24,8 @@ INSTRUCTIONS = (
     importlib.resources.files("xpt").joinpath("instructions.md").read_text(encoding="utf-8")
 )
 PLUGIN = "xpt.pytest_plugin"
+MCP_FILE = ".mcp.json"
+MCP_SERVER = {"command": "xpt", "args": ["mcp"]}
 
 _HEADING = INSTRUCTIONS.partition("\n")[0]
 _MIN_PYTEST = (8, 0)
@@ -50,12 +53,21 @@ class Check:
 
 
 @dataclass(frozen=True, slots=True)
+class McpResult:
+    """What init did to .mcp.json, and why when it left the xpt entry alone."""
+
+    status: Status
+    note: str
+
+
+@dataclass(frozen=True, slots=True)
 class InitResult:
     """What init did to AGENTS.md, why when it left the block alone, and the pytest checks."""
 
     status: Status
     note: str
     checks: tuple[Check, ...]
+    mcp: McpResult | None = None
 
 
 class InitError(Exception):
@@ -71,20 +83,66 @@ def probe() -> Probe:
     return Probe(version, installed, sys.executable)
 
 
-def init(root: Path, found: Probe, env: Mapping[str, str], *, dry_run: bool = False) -> InitResult:
+def init(
+    root: Path,
+    found: Probe,
+    env: Mapping[str, str],
+    *,
+    dry_run: bool = False,
+    mcp: bool = False,
+) -> InitResult:
     """Add the agent instructions to `root`/AGENTS.md between markers, and check pytest.
 
-    An existing block, marked or pasted by hand, is never changed. A dry run reports the same
+    With `mcp`, also add the `xpt mcp` server to `root`/.mcp.json. An existing block, marked
+    or pasted by hand, and an existing "xpt" server entry are never changed. Both files are
+    planned before either is written, so an error writes nothing. A dry run reports the same
     result and writes nothing.
     """
-    file = root / FILE
-    status, note, data = _plan(file)
-    if data is not None and not dry_run:
-        try:
-            replace(file.resolve(), data)
-        except OSError as error:
-            raise InitError(f"{FILE} could not be written: {error.strerror}.") from None
-    return InitResult(status, note, check(root, found, env))
+    plans = [(FILE, *_plan(root / FILE))]
+    if mcp:
+        plans.append((MCP_FILE, *_plan_mcp(root / MCP_FILE)))
+    for name, _, _, data in plans:
+        if data is not None and not dry_run:
+            try:
+                replace((root / name).resolve(), data)
+            except OSError as error:
+                raise InitError(f"{name} could not be written: {error.strerror}.") from None
+    (_, status, note, _), *rest = plans
+    added = McpResult(rest[0][1], rest[0][2]) if rest else None
+    return InitResult(status, note, check(root, found, env), added)
+
+
+def _plan_mcp(file: Path) -> tuple[Status, str, bytes | None]:
+    def written(config: dict[str, object]) -> bytes:
+        return (json.dumps(config, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+    if not file.exists():
+        return "created", "", written({"mcpServers": {"xpt": MCP_SERVER}})
+    try:
+        config = json.loads(file.read_text(encoding="utf-8-sig"))
+    except OSError as error:
+        raise InitError(f"{MCP_FILE} could not be read: {error.strerror}.") from None
+    except ValueError as error:
+        raise InitError(
+            f"{MCP_FILE} is not valid JSON ({error}). Fix it and run xpt init --mcp again."
+        ) from None
+    servers = config.get("mcpServers", {}) if isinstance(config, dict) else None
+    if not isinstance(config, dict) or not isinstance(servers, dict):
+        raise InitError(
+            f'{MCP_FILE} must be a JSON object with an object under "mcpServers". '
+            "Fix it and run xpt init --mcp again."
+        )
+    if servers.get("xpt") == MCP_SERVER:
+        return "present", "", None
+    if "xpt" in servers:
+        note = (
+            f'{MCP_FILE} already has an "xpt" server that differs from {json.dumps(MCP_SERVER)}, '
+            "so it was left as it is. To let xpt init add it, delete that entry and run "
+            "xpt init --mcp again."
+        )
+        return "kept", note, None
+    config["mcpServers"] = {**servers, "xpt": MCP_SERVER}
+    return "added", "", written(config)
 
 
 def _plan(file: Path) -> tuple[Status, str, bytes | None]:
@@ -250,17 +308,37 @@ def lines(result: InitResult, dry_run: bool) -> list[str]:
             "created": f"Dry run, would create {FILE} with the xpt block.",
             "added": f"Dry run, would add the xpt block to {FILE}.",
         }.get(result.status, said)
-    out = [said, *(f"{'ok' if c.ok else 'problem'}  {c.name}  {c.detail}" for c in result.checks)]
+    out = [said, *_mcp_lines(result.mcp, dry_run)]
+    out += [f"{'ok' if c.ok else 'problem'}  {c.name}  {c.detail}" for c in result.checks]
     if all(c.ok for c in result.checks):
         return [*out, "Next: run pytest."]
     return [*out, "Fix the problems above and run xpt init again."]
 
 
+def _mcp_lines(result: McpResult | None, dry_run: bool) -> list[str]:
+    if result is None:
+        return []
+    said = {
+        "created": f"Created {MCP_FILE} with the xpt server.",
+        "added": f"Added the xpt server to {MCP_FILE}.",
+        "present": f"{MCP_FILE} already has the xpt server.",
+        "kept": result.note,
+    }[result.status]
+    if dry_run:
+        said = {
+            "created": f"Dry run, would create {MCP_FILE} with the xpt server.",
+            "added": f"Dry run, would add the xpt server to {MCP_FILE}.",
+        }.get(result.status, said)
+    return [said]
+
+
 def to_json(result: InitResult, dry_run: bool) -> dict[str, Json]:
+    mcp = result.mcp
     return {
         "dry_run": dry_run,
         "path": FILE,
         "status": result.status,
         "note": result.note,
         "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in result.checks],
+        "mcp": None if mcp is None else {"path": MCP_FILE, "status": mcp.status, "note": mcp.note},
     }

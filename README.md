@@ -54,6 +54,8 @@ xpt init              # add xpt's instructions to AGENTS.md and check pytest loa
 xpt convert tests     # rewrite assert x == literal as expect(x, literal)
 ```
 
+`xpt mcp` serves the review commands as MCP tools over stdio, and `xpt init --mcp` adds it to `.mcp.json`. See [MCP server](https://harville-labs.github.io/xpt/mcp/).
+
 `pytest --expect-create` runs the tests, then fills every missing expectation the same way `xpt accept --missing` does. It writes after the session ends, never during it, and never replaces an existing expected value. The footer names what it wrote and suggests `xpt accept` only for what remains:
 
 ```

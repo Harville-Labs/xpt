@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,flaky,clean,init,convert} [options]
+xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -113,9 +113,18 @@ The checks report:
 - **pytest**: whether pytest 8.0 or later is installed in the interpreter running xpt.
 - **plugin**: whether xpt's plugin is installed and pytest will load it. It reads `addopts` from the configuration file pytest would use (`pytest.ini`, `.pytest.ini`, `pyproject.toml`, `tox.ini`, or `setup.cfg`) and from `PYTEST_ADDOPTS`, looking for `-p no:xpt`. With `PYTEST_DISABLE_PLUGIN_AUTOLOAD` set, the plugin must be named with `-p xpt.pytest_plugin`.
 
+With `--mcp`, it also adds the `xpt mcp` server to `.mcp.json` in the project root, creating the file if it is missing:
+
+```json
+{"mcpServers": {"xpt": {"command": "xpt", "args": ["mcp"]}}}
+```
+
+Other keys and servers in an existing file are kept, and the file is rewritten with two-space indentation. An `xpt` entry that differs is kept and reported, never replaced. A `.mcp.json` that is not a JSON object with an object under `mcpServers` is an error, and neither file is written.
+
 | Option | Meaning |
 |---|---|
 | `--dry-run` | Report what would change and write nothing. The checks still run. |
+| `--mcp` | Also add the `xpt mcp` server to `.mcp.json`. |
 
 ### `xpt convert PATH [PATH ...]`
 
@@ -148,13 +157,21 @@ Run a command so that every Python process it starts prints uncaught exceptions 
 | `-v` | Raise the limits as `-v` does under pytest. |
 | `-vv` | Keep Python's full traceback. |
 
+### `xpt mcp`
+
+Serve `failures`, `show`, `accept`, `reject`, `runs`, and `flaky` as MCP tools over stdio, for MCP clients such as Claude Code and Codex. Each tool returns the object its command's `--json` prints. See [MCP server](mcp.md). It runs until stdin closes. `--json` does not apply.
+
+| Option | Meaning |
+|---|---|
+| `--root ROOT` | The project root the tools read and write. Default `.`. |
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
 | `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, or an `init` check found a problem. |
-| `2` | A usage error, such as `xpt run` without a command, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, or unpaired markers in `AGENTS.md`. The error is one line on stderr that says what to do next, and nothing is written. |
+| `2` | A usage error, such as `xpt run` without a command, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, unpaired markers in `AGENTS.md`, or a malformed `.mcp.json` with `init --mcp`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files
 

@@ -66,6 +66,7 @@ The brief was a good starting point. These parts of it change.
 6. **JSON Lines files, not SQLite.** Each process writes its own file, so there is no shared write target and no lock (see Persistence).
 7. **The CLI is `xpt`, with `python -m xpt` as a fallback.** A command named `expect` would collide with the Tcl `expect` tool that many systems install.
 8. **Benchmarking agent efficiency is its own project phase, not an MVP requirement.** It is the claim the project lives or dies on, so it gets a real harness (milestone M5) instead of a spreadsheet of guesses.
+9. **`xpt api` ships inside xpt, not as a separate package.** It is the furthest of the agent helpers from expect testing, but it serves the same reader and the same goal: fewer failed runs. A separate package would be one more thing to install and keep at the right version in every environment, and it needs nothing xpt doesn't already allow (stdlib only, no network). It reads source with `ast` by default and imports only under `--import` (see Installed API listing).
 
 ## Data shapes
 
@@ -635,6 +636,38 @@ Agents lose turns to environment problems that look like code problems: the wron
 - **`xpt env NAME` never imports.** It asks the meta path finders, with the root first on `sys.path`, and walks a dotted name through each package's `submodule_search_locations` with `PathFinder`, because `importlib.util.find_spec("a.b")` imports `a`. The owning distribution is the one whose `RECORD` lists the file, or an editable install whose source directory holds it.
 - **Not in the pytest plugin yet.** A shadowing line when a test fails to import would catch the problem where it appears, but the xpt report has no slot for it today. It is a follow-up.
 
+## Installed API listing
+
+Agents call library APIs as they remember them, not as they are in the installed version, and learn otherwise from a failing run. `help()` and pydoc print whole docstrings, and reading the source costs more. `xpt api TARGET` prints one line per public name instead: signature and first docstring sentence, methods indented under their class, the installed version first. The CLI reference documents the output.
+
+```text
+$ xpt api argparse.ArgumentParser --grep intermixed
+argparse stdlib (Python 3.11.18)
+ArgumentParser(prog=None, usage=None, description=None, epilog=None, parents=[], ...)  Object for parsing command line strings into Python objects.
+  .parse_intermixed_args(args=None, namespace=None)
+  .parse_known_intermixed_args(args=None, namespace=None)
+```
+
+- **Static by default.** Importing a package runs its code: network clients that read configuration, plugins that register themselves, heavy native libraries that take seconds to load. Listing an API should do none of that. `xpt.apisource` finds a module's file through each finder on `sys.meta_path` without importing the module or its parents (`importlib.util.find_spec` on a dotted name imports the parents), and parses it with `ast`. Only the top-level statements are read, the way an import would bind them: a `def` or `class` wins over an import or assignment of the same name, `try` and `if` bodies are walked, and `sys.version_info` and `sys.platform` branches are decided for the running Python, as stubs need. `xpt.apistatic` follows `__all__` (lists, `+`, `+=`, `.extend`, and `other.__all__`), star imports, and `from x import y` re-exports to the defining module, and reads a class's constructor from `__init__`, `__new__`, dataclass and NamedTuple fields, or the first base it can resolve.
+- **Stubs first.** A `.pyi` next to the source, a `.pyi` next to an extension module, or a `<package>-stubs` package is read instead of the source. Stubs exist precisely where the source can't show the API, as in compiled packages.
+- **Say what was not read.** A name the source binds at import time, one re-exported from an extension module with no stub, or a constructor inherited from outside the source is not guessed. It prints as `unresolved: <reason>`, or `(...)` for a constructor, and a last line counts them and names `--import`. A module with no Python source prints a note instead of names.
+- **`--import` is the fallback, not a mode.** It imports the module and reads with `inspect.signature` only what the static pass left unresolved, plus the whole module when it has no source and `__all__` when it is computed. Static results win where both exist, so `--import` never makes the output less precise.
+- **Bounded.** A signature longer than 80 characters drops optional parameters and the annotations of required ones, defaults past 20 characters print as `...`, and docstrings stop at the first sentence or 72 characters. At most 80 names print by default, each member counting, with a line that says how many were left out and to use `--grep`. `--json` keeps full signatures and every parameter.
+- **Inherited members** come only from bases in the same top-level package. Listing every `BaseModel` method under each Pydantic model would bury the class's own API.
+- **Limits.** A decorator that changes a signature, such as a custom wrapper without `functools.wraps`, is not seen statically. Class attributes other than properties and enum members are not listed. The listing describes the interpreter running xpt, so it must run from the project's environment.
+
+Size against pydoc's plain-text `help()` output for the same target, on Python 3.11 (characters / lines):
+
+| Target | `help()` | `xpt api` | `xpt api --limit 0` | Ratio, full listing |
+|---|---|---|---|---|
+| `json` | 24,346 / 560 | 1,469 / 13 | 1,469 / 13 | 17x |
+| `pathlib.Path` | 10,243 / 315 | 4,415 / 60 | 4,415 / 60 | 2x |
+| `argparse.ArgumentParser` | 4,583 / 119 | 855 / 20 | 855 / 20 | 5x |
+| `pytest` 9.2.0 | 353,560 / 8,860 | 6,793 / 83 | 61,026 / 722 | 6x |
+| `hypothesis` 6.170.15 | 47,587 / 1,075 | 4,529 / 63 | 4,529 / 63 | 11x |
+
+`pathlib.Path` gains the least because pydoc already prints it compactly and most of xpt's lines are one-sentence summaries of its 60 methods. `pytest` shows why the default cap exists: its `__all__` names 91 objects, 66 of them classes. Each listing above took 0.1 to 0.25 seconds, most of it Python startup.
+
 ## Concurrency
 
 - xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` and `--expect-accept` run in the controller's `pytest_sessionfinish`, after every worker has finished. The report drops the `[gw0] platform -- Python ...` line pytest puts at the top of each failure's text under xdist, so the report and `--xpt-json` match a run without xdist.
@@ -687,4 +720,5 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **Tracebacks outside pytest.** `xpt run` and `xpt.traceback.install()` are done.
 - **MCP server.** `xpt mcp` and `xpt init --mcp` are done. Comparing it with the CLI in the agent benchmark is part of M5.
 - **Environment report.** `xpt env` and `xpt env NAME` are done. A shadowing line in the pytest report when a test module fails to import is next.
+- **Installed API listing.** `xpt api` is done.
 - **M6. Release.** Name check, docs, PyPI.

@@ -36,6 +36,7 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
       "tests": ["tests/test_demo.py::test_count"],
       "detail": "",
       "actuals": [{"dict": {"status": "ok", "count": 4}}],
+      "flaky": [],
       "expected": {"dict": {"status": "ok", "count": 3}},
       "changes": [
         {"path": "value[\"count\"]", "op": "replace", "expected": 3, "actual": 4}
@@ -51,6 +52,7 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 - `detail` says why a group can't be accepted.
 - `actuals` holds the distinct actual values, one when every call agreed.
 - `changes` and `unchanged` appear on a mismatch. `op` is `replace`, `add`, or `remove`.
+- `flaky` lists the paths whose value changed between stored runs with the same source, empty when none did. See [Flaky](#flaky).
 
 `xpt show ID --json` returns one group in the same form.
 
@@ -70,7 +72,7 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 }
 ```
 
-An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).`
+An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).` or `value["created_at"] changed between 2 runs with no source change (rule: flaky).`
 
 With `--verify`, the accept object also has `verify`:
 
@@ -118,6 +120,38 @@ With `--verify`, the accept object also has `verify`:
 ```
 
 A skip's `line` is `null` when the whole file was skipped.
+
+## Flaky
+
+`xpt flaky --json` returns the stored runs and each call site with volatile paths. A group's `flaky` list has the same entries.
+
+```json
+{
+  "schema_version": 1,
+  "command": "flaky",
+  "runs": ["20261119T150800-b910", "20261119T151200-c3d1"],
+  "sites": [
+    {
+      "id": "7f3a",
+      "site": {"path": "tests/test_order.py", "line": 7, "qualname": "test_create"},
+      "run": "20261119T151200-c3d1",
+      "flaky": [
+        {"path": "value[\"created_at\"]", "kind": "timestamp", "values": 2,
+         "runs": ["20261119T150800-b910", "20261119T151200-c3d1"], "spread": null,
+         "suggestion": "ignore=['value[\"created_at\"]']"},
+        {"path": "value[\"tags\"]", "kind": "order", "values": 2,
+         "runs": ["20261119T150800-b910", "20261119T151200-c3d1"], "spread": null,
+         "suggestion": "unordered=True"}
+      ]
+    }
+  ]
+}
+```
+
+- `run` is the newest run that recorded the call site, and the one its paths are judged in.
+- `kind` is `timestamp`, `value`, `order`, or `float`. `values` counts the distinct values at the path. `runs` are the runs compared, which share the expected argument and the project source.
+- `spread` is the largest difference between the values for a `float`, and null otherwise.
+- `suggestion` is the `expect()` keyword that would keep the path stable, or null when none can, as for a path that is not a dict entry.
 
 ## Runs
 

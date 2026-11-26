@@ -122,8 +122,17 @@ Group           # every failed observation of one call site in a run, built at r
   detail: str             # why the group cannot be accepted, "" when it can
   rejected: bool          # its one actual value matches a Rejection in decisions.jsonl
   options: Options        # the first observation's, used for every diff of the group
+  volatile: [Volatile]    # paths that changed between stored runs with the same source
   acceptable              # derived: status is missing or mismatch
-  offered                 # derived: acceptable and not rejected; what footers suggest
+  offered                 # derived: acceptable, not rejected, not volatile; what footers suggest
+
+Volatile        # a path of a group's value that differed between stored runs (see Flaky values)
+  path: [str | int]       # ["created_at"]
+  kind: "timestamp" | "value" | "order" | "float"
+  values: int             # distinct values at the path across those runs
+  runs: [str]             # the run ids compared, which share arg_sha and the source digest
+  spread: float | None    # the largest difference, for floats
+  suggestion              # derived: ignore=[...], unordered=True, atol=..., or None
 
 Outcome         # what accept did with one group
   group: Group
@@ -206,6 +215,7 @@ xpt accept <id>... [--dry-run] [--force] [--verify]
 xpt accept --missing        fill every missing expectation, nothing else
 xpt accept --all            every group not rejected; those that cannot be accepted are reported with their reason
 xpt runs                    the recorded runs, newest first
+xpt flaky                   call sites whose values changed between stored runs with the same source
 xpt clean                   delete .xpt/
 xpt reject <id>...          record each group's actual value as a bug, never to be offered
 ```
@@ -215,7 +225,7 @@ Every command takes `--json`, and `--root PATH` for a project other than the cur
 Exit codes:
 
 - `0`: the command did what it was asked, or there is nothing to do.
-- `1`: `failures` found failures, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
+- `1`: `failures` found failures, `flaky` found flaky call sites, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
 - `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record or decision, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
 
 Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. It moves to `rejected` when `xpt reject` records its actual value as a bug.
@@ -260,18 +270,43 @@ Wrong accepts are the main risk of snapshot tests for agents, and the worst ones
 
 The rules are narrow on purpose. A false refusal costs one `--force`. A rule that fires on ordinary changes would teach agents to pass `--force` every time.
 
+### Flaky values
+
+A nondeterministic value fails on every run: a timestamp, an id, a list built from a set, or a race. Without help an agent finds that out by accepting the value and watching it fail on the next run. The stored runs already hold the evidence, because every failing run records the actual value.
+
+`xpt.flaky` compares them. For each call site of a run it takes every stored run that recorded one actual value at that site with the same `arg_sha` and the same source digest, and walks consecutive values together. Each path where they differ is `Volatile`, with a kind that picks the suggestion:
+
+- `timestamp`: both strings look like an ISO date or time. Suggest `ignore=['value["created_at"]']`.
+- `value`: any other differing scalar, a dict entry that comes and goes, or a list whose length changes. Suggest `ignore=` for the path, with list indexes widened to `[...]`. A path that does not end at a dict entry with a literal key can't be ignored, so the line says to make it deterministic in the test.
+- `order`: a list or tuple whose items are the same multiset in another order. Suggest `unordered=True`.
+- `float`: numbers, at least one a float. Suggest `atol=` the spread, rounded up to one significant digit.
+
+A path with changes of more than one kind, or with changed paths inside it, is reported once as `value`.
+
+- `xpt failures`, `xpt show`, and the pytest report add a line per path after the diff: `flaky: value["created_at"] looks like a timestamp and had 2 values in 2 runs with no source change. Consider ignore=['value["created_at"]'].` The JSON group carries `flaky`, a list of paths with `kind`, `values`, `runs`, `spread`, and `suggestion`.
+- A group with volatile paths is not `offered`, so no footer and no `accept:` line suggests it. Accepting it would write a value the next run fails.
+- `accept` refuses it with the outcome `suspect` and the rule `flaky`, after the suspect-value rules and with the same `--force` override. `--all`, `--missing`, `pytest --expect-create`, and `--expect-accept` share the guard through `accept`.
+- `xpt flaky` lists every call site with volatile paths across the stored runs, each judged in the newest run that recorded it, with `--json`. It exits `1` when it finds one, like `failures`.
+
+Open questions, resolved:
+
+- **Is the fingerprint enough?** No. `arg_sha` covers only the expected argument, and an agent edits the code under test between runs all the time. A value that changed because the code changed would be called flaky, and the suggestion to ignore it would hide a real change. So the pytest controller stores a source digest with each run that recorded something: the sha256 of every `.py` file's path and contents under the root, skipping hidden directories, `__pycache__`, `node_modules`, `site-packages`, and virtual environments. Two runs count only when their digests match. The cost is a walk of the project's Python files once per failing session. Any edit, an accept included, starts the comparison over, which errs toward reporting nothing. Runs without a digest, from an older xpt or a process with no driver, never count. Data files outside `.py` are not hashed.
+- **Do repeated runs count?** No. A run is one pytest session. `pytest --count` (pytest-repeat) runs the same call site several times in one session, and calls that disagree already make the group a `conflict` that names each value.
+- **Which runs?** Every stored run with the same fingerprint and digest, not only earlier ones, because run ids started in the same second do not sort by time. Five runs are kept, so the comparison is bounded.
+
 ## Persistence
 
 ```
 .xpt/
   .gitignore            # "*", written on first use
   runs/<run>/<worker>.jsonl
+  runs/<run>/source     # the project source digest, written by the pytest controller
   latest                # the run id of the newest complete run
   decisions.jsonl       # reject decisions, one per line (see Rejection)
 ```
 
 - Each pytest process, controller or xdist worker, appends to its own file. Nothing is shared, so nothing is locked. This follows "separate before serializing shared state."
-- The controller writes `latest` at session end with `os.replace`, so a crashed run never becomes the latest.
+- The controller writes `latest` at session end with `os.replace`, so a crashed run never becomes the latest. Just before, it writes the run's source digest to `runs/<run>/source` the same way (see Flaky values).
 - Old runs are pruned to the last 5 by default.
 - Each line is one JSON object with `"schema_version": 1`. A value that is absent (`expected` when missing) is left out of the object, so a recorded `None` stays distinct from no value. `atol` and `rtol` appear only when they are not 0, `ignore` (a list of path strings) only when set, `unordered` only when true, and `key` (a recorded value) only for a keyed call. Reading a run validates every line and names the file and line of a malformed one.
 - A process with no driver, such as plain unittest or a script, records under the current directory and writes `latest` from an `atexit` hook. Under xdist, the controller hands its run id to each worker.
@@ -395,7 +430,7 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 ```
 
 - Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. When the error is raised in a helper, the header shows the chain of project frames from the test down instead, as `path:line > path:line function`, keeping the first frame and the three nearest the error. The test's own name is left out because the node id has it. The next line is the source line at the deepest frame, after `> `. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
-- An `expect()` failure shows its short id, its status, and the path diff. A group that is offered, recorded, and not written by this session ends with `accept: xpt accept <id>`. The footer already names every id, but an agent reading one block should not have to match ids against the footer to act on the diff it just read. The line and the footer's `Next:` come from the same set of pending groups, so they cannot disagree. Rejected, conflicting, and just-accepted groups get no line.
+- An `expect()` failure shows its short id, its status, the path diff, and a `flaky:` line for each path that changed between stored runs with the same source (see Flaky values). A group that is offered, recorded, and not written by this session ends with `accept: xpt accept <id>`. The footer already names every id, but an agent reading one block should not have to match ids against the footer to act on the diff it just read. The line and the footer's `Next:` come from the same set of pending groups, so they cannot disagree. Rejected, conflicting, and just-accepted groups get no line.
 - A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars, unsupported values, and other operators keep pytest's explanation.
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
 - Parametrized cases that fail at the same line with the same kind of error fold into the first case. Each other case gets an `also fails:` line with its full node id, which can be pasted into a pytest command, and the first detail line where it differs from the first case, without the shared exception type. The default limit of 10 applies, and the rest are counted.
@@ -418,7 +453,7 @@ a81f  tests/test_parser.py:14  mismatch  2 tests
 1 failure in run 20260101T120000-ab12 (1 mismatch), 1 acceptable. Next: xpt accept a81f
 ```
 
-There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`. Reject adds `outcomes`. Each group carries `rejected`.
+There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`. Reject adds `outcomes`. Each group carries `rejected` and `flaky`.
 
 The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `reject`, `load_rejections`, `mark`, `diff`, and their data types, so an MCP server later is another thin wrapper and not a redesign.
 
@@ -449,7 +484,7 @@ Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, becaus
 - **Rubber-stamping.** The tool makes accepting cheap, so agents will accept regressions. Mitigations: no bulk accept by default, the diff shown at accept time, `--dry-run`, and refusing suspect values without `--force`. The benchmark (M5) measures how often wrong accepts happen. We do not claim to prevent them.
 - **Dynamic call sites.** `expect` called through a helper reports the helper's frame. We support `expect(..., _depth=1)` the way expecttest supports `skip`. A call created through `functools.partial` or `exec` has no source to rewrite. We record it as unsupported for rewriting, and the comparison still runs.
 - **Generated or non-file sources** (doctests, notebooks, `python -c`): same as above.
-- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets, `unordered=` covers lists, `ignore=` covers volatile dict entries, and adapters cover the rest. Default `repr` of arbitrary objects is never used, because it embeds addresses.
+- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets, `unordered=` covers lists, `ignore=` covers volatile dict entries, and adapters cover the rest. `xpt flaky` finds the paths that need them from the stored runs, and accept refuses them. Default `repr` of arbitrary objects is never used, because it embeds addresses.
 - **Large values.** Records are capped at 1 MB per observation by default. Larger values are recorded as a hash plus a summary and cannot be inline-accepted.
 - **Sensitive data.** `.xpt/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `xpt clean`. The README says so plainly.
 - **Python 3.11 floor** excludes 3.10 users. 3.10 is end of life, so this is acceptable.

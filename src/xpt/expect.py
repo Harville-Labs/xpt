@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Iterable
-from types import FrameType
-from typing import NoReturn
+from types import TracebackType
+from typing import NoReturn, overload
 
 from xpt import errors, keyed, record, report
 from xpt.digest import Digest
@@ -13,7 +13,7 @@ from xpt.options import Options, options
 from xpt.output import output
 from xpt.record import Observation, Status
 from xpt.serialize import UnsupportedValue, serialize
-from xpt.site import called_text, locate
+from xpt.site import Frame, WithItem, called_text, locate
 from xpt.value import Value
 
 _MISSING = object()
@@ -73,78 +73,164 @@ class Expect:
             return
         _fail(actual, expected, key, how, sys._getframe(1 + _depth), note=_note)
 
+    @overload
     def raises(
         self,
         fn: Callable[[], object],
+        expected: object = ...,
+        *,
+        subclass: bool = False,
+        ignore: Iterable[str] = (),
+        _depth: int = 0,
+    ) -> None: ...
+
+    @overload
+    def raises(
+        self,
+        expected: BaseException = ...,
+        /,
+        *,
+        subclass: bool = False,
+        ignore: Iterable[str] = (),
+        _depth: int = 0,
+    ) -> Raises: ...
+
+    def raises(
+        self,
+        fn: object = _MISSING,
         expected: object = _MISSING,
         *,
         subclass: bool = False,
         ignore: Iterable[str] = (),
         _depth: int = 0,
-    ) -> None:
-        """Call `fn` and fail unless it raises an exception equal to `expected`.
+    ) -> Raises | None:
+        """Fail unless `fn()`, or the `with` block, raises an exception equal to `expected`.
+
+        `expect.raises(fn, expected)` calls `fn`. `with expect.raises(expected):` runs the
+        block instead, and the expected exception is the first argument.
 
         Exceptions are equal when they have the same type, `args`, and `__notes__`. With
         `subclass=True`, a subclass of `expected`'s type matches too. `ignore` works as it
         does for `expect()`, on dict entries inside the exception's args.
 
         Leaving out `expected` always fails and records what was raised, so `xpt accept` can
-        write it as a constructor call such as `ValueError("bad")`. A call that returns
-        instead fails with what it returned. `KeyboardInterrupt`, `GeneratorExit`, and other
+        write it as a constructor call such as `ValueError("bad")`. A call that returns, or a
+        block that finishes, instead fails. `KeyboardInterrupt`, `GeneratorExit`, and other
         `BaseException`s outside `Exception` and `SystemExit` pass through unless `expected`
-        is one, and a failed `expect()` inside `fn` always does.
+        is one, and a failed `expect()` inside always does.
         """
         __tracebackhide__ = True
         how = options(0.0, 0.0, ignore, False)
         if not isinstance(subclass, bool):
             raise TypeError(f"subclass must be True or False, got {type(subclass).__name__}.")
+        block = fn is _MISSING or isinstance(fn, BaseException)
+        if block and fn is not _MISSING:
+            if expected is not _MISSING:
+                raise TypeError(
+                    "with expect.raises() takes the expected exception once, as its first argument."
+                )
+            expected = fn
+        _check_expected(fn if _is_class(fn) else expected)
+        frame = sys._getframe(1 + _depth)
+        if block:
+            return Raises(expected, subclass, how, WithItem.of(frame))
         if not callable(fn):
             raise TypeError(
                 "expect.raises() takes a function to call first, such as "
-                f"lambda: parse('x'), got {type(fn).__name__}."
+                f"lambda: parse('x'), or no function in a with statement, got "
+                f"{type(fn).__name__}."
             )
-        if expected is not _MISSING and not isinstance(expected, BaseException):
-            hint = (
-                f"{expected.__name__}('message')"
-                if isinstance(expected, type)
-                else "ValueError('message')"
-            )
-            raise TypeError(
-                f"expect.raises() expects an exception instance such as {hint}, "
-                f"got {expected!r}. Leave it out to record the exception and accept it."
-            )
-        frame = sys._getframe(1 + _depth)
         raised, caught = _call(fn, expected)
         if not raised:
             _returned(caught, expected, how, frame)
-        if isinstance(caught, BaseException) and isinstance(expected, BaseException):
-            kind = type(expected)
-            if subclass and type(caught) is not kind and isinstance(caught, kind):
-                caught = errors.retyped(caught, kind)
-            if equal(caught, expected):
-                return
-        _fail(caught, expected, _MISSING, how, frame, report.RAISES)
+        _compare(caught, expected, subclass, how, frame)
+        return None
+
+
+class Raises:
+    """`with expect.raises(expected):`, which compares what the block raised on exit."""
+
+    def __init__(self, expected: object, subclass: bool, how: Options, where: WithItem) -> None:
+        self._expected = expected
+        self._subclass = subclass
+        self._how = how
+        self._where = where
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(
+        self,
+        kind: type[BaseException] | None,
+        error: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        __tracebackhide__ = True
+        expected, how, where = self._expected, self._how, self._where
+        if error is None:
+            _finished(expected, how, where)
+        if not _catches(error, expected):
+            return False
+        try:
+            _compare(error, expected, self._subclass, how, where)
+        except ExpectationFailed as failed:
+            raise failed from None
+        return True
 
 
 expect = Expect()
+
+
+def _is_class(value: object) -> bool:
+    return isinstance(value, type) and issubclass(value, BaseException)
+
+
+def _check_expected(expected: object) -> None:
+    """Refuse an expected value that is not an exception instance, with how to write one."""
+    if expected is _MISSING or isinstance(expected, BaseException):
+        return
+    hint = (
+        f"{expected.__name__}('message')" if isinstance(expected, type) else "ValueError('message')"
+    )
+    raise TypeError(
+        f"expect.raises() expects an exception instance such as {hint}, "
+        f"got {expected!r}. Leave it out to record the exception and accept it."
+    )
 
 
 def _call(fn: Callable[[], object], expected: object) -> tuple[bool, object]:
     """Whether `fn` raised, and what it raised or returned."""
     try:
         return False, fn()
-    except ExpectationFailed:
-        raise
     except BaseException as error:
-        wanted = isinstance(expected, BaseException) and isinstance(error, type(expected))
-        if wanted or isinstance(error, Exception | SystemExit):
+        if _catches(error, expected):
             return True, error
         raise
 
 
+def _catches(error: BaseException, expected: object) -> bool:
+    """Whether expect.raises() compares `error` rather than letting it pass through."""
+    if isinstance(error, ExpectationFailed):
+        return False
+    wanted = isinstance(expected, BaseException) and isinstance(error, type(expected))
+    return wanted or isinstance(error, Exception | SystemExit)
+
+
+def _compare(caught: object, expected: object, subclass: bool, how: Options, frame: Frame) -> None:
+    """Return when `caught` equals `expected`, and fail with the difference otherwise."""
+    __tracebackhide__ = True
+    if isinstance(caught, BaseException) and isinstance(expected, BaseException):
+        kind = type(expected)
+        if subclass and type(caught) is not kind and isinstance(caught, kind):
+            caught = errors.retyped(caught, kind)
+        if equal(caught, expected):
+            return
+    _fail(caught, expected, _MISSING, how, frame, report.RAISES)
+
+
 def _observe(
     how: Options,
-    frame: FrameType,
+    frame: Frame,
     status: Status,
     want: Value | None,
     got: Value | None,
@@ -171,7 +257,7 @@ def _fail(
     expected: object,
     key: object,
     how: Options,
-    frame: FrameType,
+    frame: Frame,
     call: str = "expect()",
     note: str = "",
 ) -> None:
@@ -208,7 +294,7 @@ def _fail(
     raise ExpectationFailed(f"{message}\n{problem}" if problem else message, observation)
 
 
-def _returned(value: object, expected: object, how: Options, frame: FrameType) -> NoReturn:
+def _returned(value: object, expected: object, how: Options, frame: Frame) -> NoReturn:
     """Fail an expect.raises() whose function returned `value`, recording what it returned."""
     __tracebackhide__ = True
     called = called_text(frame, record.recorder.root) or "the function"
@@ -220,6 +306,22 @@ def _returned(value: object, expected: object, how: Options, frame: FrameType) -
     want = None if expected is _MISSING else how.prepare(serialize(expected))
     wanted = "" if want is None else f", expected {report.show(want)}"
     message = f"{report.RAISES}: {called} returned {shown} instead of raising{wanted}."
+    _not_raised(message, want, how, frame, got)
+
+
+def _finished(expected: object, how: Options, where: WithItem) -> NoReturn:
+    """Fail a `with expect.raises():` block that finished without raising."""
+    __tracebackhide__ = True
+    want = None if expected is _MISSING else how.prepare(serialize(expected))
+    wanted = "" if want is None else f", expected {report.show(want)}"
+    message = f"{report.RAISES}: the with block finished without raising{wanted}."
+    _not_raised(message, want, how, where, None)
+
+
+def _not_raised(
+    message: str, want: Value | None, how: Options, frame: Frame, got: Value | None = None
+) -> NoReturn:
+    __tracebackhide__ = True
     observation = _observe(how, frame, "returned", want, got, message)
     note = _save(observation)
     raise ExpectationFailed(f"{message}\n{note}" if note else message, observation)

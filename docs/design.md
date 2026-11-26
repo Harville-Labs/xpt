@@ -450,3 +450,13 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **Setup and migration.** `xpt init` and `xpt convert` are done.
 - **M6. Release.** Name check, docs, PyPI.
+
+### Backlog priority
+
+Open issues carry a `P1`, `P2`, or `P3` label. The order follows the guiding question: core gaps that every agent hits come first, then the benchmark work needed to measure them, then tools whose scope is still undecided.
+
+- **P1. Next.** The remaining core gaps: `expect.raises` (#65), `expect.output` (#66), flaky paths from the stored runs (#67), and the xdist matrix (#14). Accept showing the changed code the failing test ran (#68) is the strongest guard against wrong accepts. The benchmark must be able to tell the arms apart before any of these can be judged, so harder tasks (#45) and intervals with a tie verdict (#47) are P1 too.
+- **P2. After P1.** Work that builds on P1's line tracing or needs a measurement first: deterministic time, random, and uuid (#72), coverage limited to the diff (#63), the compact traceback outside pytest (#60), the smaller token sinks (#64), and the remaining benchmark items (#46, #48, #49).
+- **P3. Scope decision first.** Tools further from expect testing, each of which may belong in a sibling package: probe (#59), profile (#61), api (#62), the MCP server (#69), affected tests (#70), env (#71), and grouped type-checker errors (#73). Each needs a recorded scope decision before code.
+
+#15 is the umbrella for the benchmark and has no priority of its own.

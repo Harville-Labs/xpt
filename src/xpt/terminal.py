@@ -244,7 +244,7 @@ def _failure(rep: Any) -> Failure:
     else:
         path, line = location(rep)
         where = Where(path, None if line is None else line + 1, None, Text(_text(rep)))
-    return Failure(rep.nodeid, when, where, streams(rep.sections), _text(rep))
+    return Failure(record.base_nodeid(rep.nodeid), when, where, streams(rep.sections), _text(rep))
 
 
 def _text(rep: Any) -> str:

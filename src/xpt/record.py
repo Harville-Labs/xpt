@@ -70,6 +70,15 @@ def environment() -> Environment:
     )
 
 
+_XDIST_GROUP = re.compile(r"@[^\[\]@/:]+$")
+
+
+def base_nodeid(nodeid: str) -> str:
+    """`nodeid` without the `@group` suffix pytest-xdist's `--dist loadgroup` adds on some
+    pytest versions, so ids match a run without xdist and pytest can rerun them."""
+    return _XDIST_GROUP.sub("", nodeid)
+
+
 @dataclass(slots=True)
 class Recorder:
     """Appends this process's failed observations to `.xpt/runs/<run>/<worker>.jsonl`.

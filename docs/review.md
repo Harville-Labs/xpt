@@ -16,7 +16,7 @@ Each call site has a short id such as `b211`. The id is a hash of the file, the 
 | `mismatch` | The values differ | yes |
 | `conflict` | The call ran more than once with different values, or the file changed during the run | no |
 | `unsupported` | The value has a type xpt can't record, or is over 1 MB | no |
-| `returned` | `expect.raises(fn)` called `fn` and it returned instead of raising | no |
+| `returned` | `expect.raises(fn)` called `fn` and it returned instead of raising, or a `with expect.raises():` block finished | no |
 | `unlocatable` | xpt can't find the call in the source | no |
 
 A conflict usually means the call needs one `expect` per case. A call site that you rejected also shows `rejected` after its status.

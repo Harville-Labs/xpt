@@ -208,7 +208,7 @@ One call site can run many times: in a loop, in a parametrized test, from a help
 - With `key=`, every observation stores the whole expected dict and, as its actual value, that dict with its own case replaced. Grouping merges them: the group's actual value is the expected dict with every failing case's entry set. Cases that passed record nothing, so their entries come through unchanged from the expected dict. The group is `missing` when every failing case had no entry, and `mismatch` otherwise. Two calls with the same key and different values conflict, and so does a site that mixes keyed and unkeyed calls.
 - Values are equal when `norm` says so, the same equality `diff` uses, so `1` and `1.0` agree.
 - Calls that disagree on `arg_sha` are a conflict too, because the file changed during the run. So are calls with equal actual values but different expected values, which happens when the expected argument depends on a parameter.
-- If any call of `expect.raises` returned instead of raising, the group is `returned` and cannot be accepted. Its detail holds each distinct failure message.
+- If any call of `expect.raises` returned, or its block finished, instead of raising, the group is `returned` and cannot be accepted. Its detail holds each distinct failure message.
 - If any call recorded no actual value (unsupported, or over the size cap), the group is `unsupported` and cannot be accepted.
 - Unlocatable observations group by path, line, and reason. They are shown with status `unlocatable` and never accepted.
 
@@ -443,7 +443,7 @@ Acceptance never runs code from the record. It builds source text from the `Valu
 
 ## Exceptions
 
-`expect.raises(fn, expected?)` treats an exception as a value. It calls `fn`, takes what it raised as the actual value, and goes through the same compare, record, and accept path as `expect()`. The call site's callee is `expect.raises` and its expected argument is the second positional or `expected=`, so identity, fingerprints, rewriting, and `pytest --expect-create` need nothing new.
+`expect.raises(fn, expected?)` treats an exception as a value. `with expect.raises(expected?):` does the same for a block (see The block form). The call form calls `fn`, takes what it raised as the actual value, and goes through the same compare, record, and accept path as `expect()`. The call site's callee is `expect.raises` and its expected argument is the second positional or `expected=`, so identity, fingerprints, rewriting, and `pytest --expect-create` need nothing new.
 
 - **What is recorded.** The exact type and `args`, and `__notes__` when set. `serialize` records any `BaseException` that is not a dataclass or a registered class, wherever it appears in a value. `args` is the field `"*"`, a tuple whose items are written as positional arguments: `{"builtins:ValueError": {"*": {"tuple": ["bad"]}}}` is `ValueError("bad")`. The field's path step is `.args`, the attribute that holds them, so a diff reads `value.args[0]` and an ignore path is written the same way. The traceback, cause, context, and other attributes are left out. They hold addresses, line numbers, and paths that change from run to run, and none of them can be passed to a constructor.
 - **Comparison.** `equal` compares two exceptions whose class has no `__eq__` of its own by exact type, `args`, and notes, each with the same rules as any other value, so an `ExceptionGroup`'s children compare by value too. A class with its own `__eq__` keeps it. `subclass=True` accepts an instance of a subclass of the expected type. Before comparing, xpt rebuilds the caught exception's args and notes as the expected type, so a diff shows only args and notes, and accepting keeps the base type the test named.
@@ -456,7 +456,15 @@ Decisions on the questions issue #65 left open:
 - **Classes with custom `__init__` signatures** are written through `expect.exception(Type, *args)`, not as a `{"type": ..., "args": ...}` dict. The test still reads as one expression that builds an exception, it compares with the same rules, and `expect.raises` needs no second shape of expected value.
 - **`ExceptionGroup`** gets a tree of its children with no special case, because the children are part of its `args` and each one is recorded as an exception.
 - **A type the test file can't name** is skipped with a reason naming the import to add, the same rule as a dataclass. Writing a qualified name the file doesn't bind would leave a `NameError`.
-- **The context-manager form** (`with expect.raises() as caught:`) is left for later. Its expected argument would be the first positional, and the comparison would run in `__exit__`, whose frame points at the `with` statement rather than at a call. Both need their own locate and rewrite rules.
+- **The context-manager form** came in #83, described in The block form below. It binds nothing with `as`. The exception is compared and recorded, and a test that needs its attributes can catch it itself.
+
+### The block form
+
+`with expect.raises(expected?):` runs the block, and `__exit__` compares what it raised with the rules above. It returns true, suppressing the exception, only when the exception matched. A mismatch raises `ExpectationFailed` with its context suppressed, so the report shows the diff rather than a second traceback. A block that finishes records status `returned` with no actual value.
+
+- **Which form.** `expect.raises()` with no arguments, or with an exception instance first, returns a `Raises` context manager. Anything else first is the call form, and a callable is required. An exception class first is refused with how to write an instance, because `with expect.raises(ValueError):` from pytest habit would otherwise call the class.
+- **Identity.** The site is the `expect.raises(...)` call that is the `with` item, so its callee, ordinal, and fingerprint are a call's like any other, and the two forms share one ordinal count. By the time `__exit__` runs, the frame's last instruction is in the block's cleanup, so `expect.raises` saves the frame's code, last instruction, line, and globals as a `site.WithItem` when it builds the context manager, and `locate` reads those. Each item of a multi-line or parenthesized `with` is its own call with its own position, so the rule needs no special case for them. When one `with` holds two `expect.raises()` items, the innermost catches the exception and the outer one sees none, as with any nested context managers.
+- **The expected argument.** `site._collect` marks each call that is a `with` item, and `expected_arg` takes the first positional argument of a marked call instead of the second, or `expected=` for either. `arg_sha`, stale detection in accept, and `--expect-create` read it through that one function. Rewrite inserts the value as the first argument, before any keywords. A context manager whose call is not a `with` item, such as one assigned first and entered later, is `unlocatable`, since the call's first argument could not be told from the call form's.
 
 ## Comparison options
 
@@ -629,6 +637,8 @@ expect(actual)  # missing: fails, records
 expect(actual, expected)  # compares with ==, records on mismatch
 expect.raises(fn)  # calls fn; missing: fails, records what it raised
 expect.raises(fn, ValueError("bad"))  # compares type, args, and notes; records on mismatch
+with expect.raises(ValueError("bad")):  # the same for a block; the expected value comes first
+    ...
 ```
 
 Keyword-only arguments change how a call compares: `atol=`, `rtol=`, `ignore=`, `unordered=`, and `key=`. They stay in the source, so a reviewer can see them, and they are recorded with each observation, so review and accept compare the same way the test did. `expect.raises` takes `subclass=` and `ignore=`.

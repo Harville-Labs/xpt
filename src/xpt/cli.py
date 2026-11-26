@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import convert, decisions, init, render
+from xpt import convert, decisions, flaky, init, render
 from xpt.accept import AcceptError, AcceptResult, accept, lock
 from xpt.group import Group, group, missing, pick
 from xpt.record import (
@@ -22,6 +22,7 @@ from xpt.record import (
     load_run,
     run_ids,
 )
+from xpt.site import CallSite, SiteKey, short_ids
 from xpt.value import Json
 from xpt.verify import accepted_tests, rerun
 
@@ -51,7 +52,9 @@ class _Run:
 
 def _load(root: Path, run: str | None) -> _Run:
     groups = decisions.mark(group(load_run(root, run)), decisions.load_rejections(root))
-    return _Run(run or latest_run(root), groups, f" --run {run}" if run else "")
+    id = run or latest_run(root)
+    groups = flaky.mark(groups, flaky.find(flaky.load_history(root), id))
+    return _Run(id, groups, f" --run {run}" if run else "")
 
 
 def _pick(run: _Run, ids: Sequence[str]) -> list[Group]:
@@ -143,6 +146,29 @@ def runs(args: argparse.Namespace, root: Path) -> Output:
     )
 
 
+def flaky_command(args: argparse.Namespace, root: Path) -> Output:
+    history = flaky.load_history(root)
+    found: dict[SiteKey, tuple[CallSite, tuple[flaky.Volatile, ...]]] = {}
+    for key, seen in history.items():
+        last = seen[-1]
+        if paths := flaky.volatile(history, key, last.run):
+            found[key] = (last.site, paths)
+    ids = short_ids(s.site for seen in history.values() for s in seen)
+    sites = sorted(
+        ((ids[key], site, paths) for key, (site, paths) in found.items()),
+        key=lambda s: (s[1].path, s[1].line, s[1].ordinal),
+    )
+    runs = run_ids(root)
+    return Output(
+        1 if sites else 0,
+        render.flaky_sites_lines(sites, len(runs)),
+        {
+            "runs": list(runs),
+            "sites": [render.flaky_site_json(*s) for s in sites],
+        },
+    )
+
+
 def clean(args: argparse.Namespace, root: Path) -> Output:
     directory = root / DIRECTORY
     if not directory.is_dir():
@@ -213,6 +239,7 @@ def _parser() -> argparse.ArgumentParser:
     sub = add("reject", reject, "record actual values as bugs, never to be offered", picked)
     sub.add_argument("ids", nargs="+", metavar="id")
     add("runs", runs, "list recorded runs")
+    add("flaky", flaky_command, "list call sites whose values change between stored runs")
     add("clean", clean, "delete .xpt/ and every recorded value")
     sub = add("init", init_command, "add xpt's agent instructions to AGENTS.md and check pytest")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")

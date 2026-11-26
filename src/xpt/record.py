@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, TextIO, TypeVar, cast
 
+from xpt import sources
 from xpt.options import PLAIN, Options, options
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Value, canonical, from_json, to_json
@@ -23,9 +24,11 @@ SCHEMA_VERSION = 1
 MAX_RECORD_BYTES = 1_000_000
 KEEP_RUNS = 5
 DIRECTORY = ".xpt"
+SOURCE = "source"
 
 _STATUSES: tuple[Status, ...] = ("missing", "mismatch", "unsupported", "returned")
 _RUN_ID = re.compile(r"\d{8}T\d{6}-[0-9a-f]{4}")
+_SHA = re.compile(r"[0-9a-f]{64}")
 
 T = TypeVar("T")
 
@@ -106,11 +109,16 @@ class Recorder:
         file.write(line + "\n")
         file.flush()
 
-    def finish(self) -> None:
+    def finish(self, *, source: bool = False) -> None:
+        """Close the file and make the run the latest. `source` also stores the project's
+        source digest with the run, which `xpt.flaky` compares between runs."""
         self._close()
         directory = self.root / DIRECTORY
         if not self.enabled or not directory.is_dir():
             return
+        run_dir = directory / "runs" / self.run
+        if source and run_dir.is_dir():
+            _write(run_dir / SOURCE, sources.digest(self.root) + "\n")
         temp = directory / f"latest.{self.run}.tmp"
         temp.write_text(self.run, encoding="utf-8")
         os.replace(temp, directory / "latest")
@@ -158,6 +166,22 @@ def load_run(root: Path, run: str | None = None) -> list[Observation]:
     return [
         o for path in sorted(run_dir.glob("*.jsonl")) for o in read_jsonl(root, path, from_record)
     ]
+
+
+def source_digest(root: Path, run: str) -> str | None:
+    """The project source digest stored with a run, None when the run has none."""
+    path = root / DIRECTORY / "runs" / _run_id(run) / SOURCE
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text if _SHA.fullmatch(text) else None
+
+
+def _write(path: Path, text: str) -> None:
+    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    temp.write_text(text, encoding="utf-8")
+    os.replace(temp, path)
 
 
 def latest_run(root: Path) -> str:

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from xpt.atomic import replace
+from xpt.flaky import accept_reason
 from xpt.group import Group
 from xpt.record import state_directory
 from xpt.rewrite import Outcome, rewrite
@@ -36,7 +37,8 @@ def accept(
     """Write each acceptable group's actual value into its source file as the expected value.
 
     A group is written only when its expected argument's text still matches the run, and,
-    unless `force`, when its actual value does not look broken (see `xpt.suspect`). Each
+    unless `force`, when its actual value does not look broken (see `xpt.suspect`) and did
+    not change between runs with the same source (see `xpt.flaky`). Each
     file is rewritten in one pass to a temporary file and moved into place, under an
     exclusive `.xpt/accept.lock`. A dry run reports the same result and writes nothing.
     """
@@ -49,6 +51,8 @@ def accept(
             outcomes[i] = Outcome(g, "skipped", g.detail)
         elif not force and (found := suspect(g.expected, g.actuals[0])):
             outcomes[i] = Outcome(g, "suspect", found.reason + _FORCE_HINT)
+        elif not force and g.volatile:
+            outcomes[i] = Outcome(g, "suspect", accept_reason(g.volatile))
         else:
             by_path[site.path].append(i)
     changed = []

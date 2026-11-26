@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass
-from typing import Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from xpt.diff import norm
 from xpt.keyed import entry, with_entry
@@ -12,6 +12,9 @@ from xpt.record import Observation
 from xpt.report import show
 from xpt.site import CallSite, SiteKey, Unlocatable, short_ids
 from xpt.value import Value, canonical
+
+if TYPE_CHECKING:
+    from xpt.flaky import Volatile
 
 GroupStatus = Literal["missing", "mismatch", "unsupported", "returned", "unlocatable", "conflict"]
 
@@ -32,7 +35,8 @@ class Group:
     actual values, one when the calls agree. `expected` is None when it was missing or when
     the calls disagree on it. `detail` says why a group is not acceptable, or for an
     acceptable one holds the calls' note, such as how expect.output normalized. `rejected` means
-    its one actual value was rejected as a bug with `xpt reject`.
+    its one actual value was rejected as a bug with `xpt reject`. `volatile` holds the paths
+    whose value changed between stored runs with the same source (see `xpt.flaky`).
     """
 
     id: str | None
@@ -44,6 +48,7 @@ class Group:
     detail: str
     rejected: bool = False
     options: Options = PLAIN
+    volatile: tuple[Volatile, ...] = ()
 
     @property
     def acceptable(self) -> bool:
@@ -51,8 +56,8 @@ class Group:
 
     @property
     def offered(self) -> bool:
-        """Whether to suggest accepting it: acceptable and not rejected."""
-        return self.acceptable and not self.rejected
+        """Whether to suggest accepting it: acceptable, not rejected, and not flaky."""
+        return self.acceptable and not self.rejected and not self.volatile
 
 
 def missing(groups: Iterable[Group]) -> list[Group]:

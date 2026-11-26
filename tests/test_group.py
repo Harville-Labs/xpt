@@ -177,7 +177,7 @@ def test_n(n):
     result = pytester.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2")
     result.assert_outcomes(failed=4)
     run_dir = next((pytester.path / ".xpt" / "runs").iterdir())
-    assert len(list(run_dir.iterdir())) == 2
+    assert len(list(run_dir.glob("*.jsonl"))) == 2
     [g] = group(load_run(pytester.path))
     assert (g.status, g.actuals, g.expected) == ("mismatch", (Int(0),), Int(1))
     assert g.tests == tuple(f"test_param.py::test_n[{n}]" for n in (1, 2, 3, 4))

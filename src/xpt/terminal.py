@@ -9,9 +9,10 @@ from typing import Any
 
 import pytest
 
-from xpt import decisions, record
+from xpt import decisions, flaky, record
 from xpt.accept import Accepted, AcceptResult
 from xpt.failure import Failure, Text, Where, streams, where_from_json
+from xpt.site import SiteKey
 from xpt.summary import Session, limits, report_json, report_lines
 
 try:
@@ -202,9 +203,17 @@ class AgentReporter(TerminalReporter):  # ty: ignore[subclass-of-final-class]
             exit_code=int(session.exitstatus) if session is not None else 0,
             run=run,
             rejected=self._rejected() if run else frozenset(),
+            flaky=self._flaky(run) if run else {},
             created=self.config.stash.get(CREATED, None),
             accepted=self.config.stash.get(ACCEPTED, None),
         )
+
+    def _flaky(self, run: str) -> dict[SiteKey, tuple[flaky.Volatile, ...]]:
+        try:
+            return flaky.find(flaky.load_history(record.recorder.root), run)
+        except (record.RecordError, OSError) as error:
+            self.write_line(f"xpt: {error}")
+            return {}
 
     def _rejected(self) -> frozenset[decisions.Rejection]:
         try:

@@ -39,7 +39,7 @@ def test_a_session_records_failures_by_node_id_and_marks_the_run_latest(
     )
     assert sites == [("TestGroup.test_mismatch", 11), ("test_missing", 7)]
     [run_dir] = (pytester.path / ".xpt" / "runs").iterdir()
-    assert [p.name for p in run_dir.iterdir()] == ["main.jsonl"]
+    assert sorted(p.name for p in run_dir.iterdir()) == ["main.jsonl", "source"]
 
 
 def test_the_no_record_flag_writes_nothing(pytester: pytest.Pytester):
@@ -63,7 +63,8 @@ def test_xdist_workers_share_the_controller_run_and_write_their_own_files(
     assert len(observations) == 2
     [run_dir] = (pytester.path / ".xpt" / "runs").iterdir()
     assert {o.run for o in observations} == {run_dir.name}
-    assert all(p.name.startswith("gw") for p in run_dir.iterdir())
+    assert all(p.name.startswith("gw") for p in run_dir.glob("*.jsonl"))
+    assert (run_dir / "source").is_file()
     latest = (pytester.path / ".xpt" / "latest").read_text(encoding="utf-8")
     assert latest == run_dir.name
 

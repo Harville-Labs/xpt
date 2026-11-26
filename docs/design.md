@@ -276,7 +276,8 @@ A nondeterministic value fails on every run: a timestamp, an id, a list built fr
 
 `xpt.flaky` compares them. For each call site of a run it takes every stored run that recorded one actual value at that site with the same `arg_sha` and the same source digest, and walks consecutive values together. Each path where they differ is `Volatile`, with a kind that picks the suggestion:
 
-- `timestamp`: both strings look like an ISO date or time. Suggest `ignore=['value["created_at"]']`.
+- `timestamp`: both strings look like an ISO date or time. Suggest `ignore=['value["created_at"]']` or the `xpt_deterministic` fixture (see Deterministic tests).
+- `uuid`: both strings are UUIDs, with or without dashes. Suggest `ignore=` for the path or the `xpt_deterministic` fixture. When the path can't be ignored, the line says to pin it with the fixture. Accept's refusal names the fixture after the keywords.
 - `value`: any other differing scalar, a dict entry that comes and goes, or a list whose length changes. Suggest `ignore=` for the path, with list indexes widened to `[...]`. A path that does not end at a dict entry with a literal key can't be ignored, so the line says to make it deterministic in the test.
 - `order`: a list or tuple whose items are the same multiset in another order. Suggest `unordered=True`.
 - `float`: numbers, at least one a float. Suggest `atol=` the spread, rounded up to one significant digit.
@@ -401,6 +402,34 @@ Decisions on the questions issue #65 left open:
 - **Reading consumes.** `readouterr()` empties the fixture's buffer, as it does when a test calls it. Re-emitting the text would duplicate it in a later `expect.output` and in pytest's own section. The failure's diff and record hold the whole output, so nothing is lost.
 - **Bytes decode as UTF-8 with `backslashreplace`.** The record holds strings only, and an invalid byte stays visible as `\xff` rather than failing the call.
 
+## Deterministic tests
+
+`ignore=` handles volatile values after the fact. Most come from a few standard-library sources that can be pinned before the test runs, and a pinned value can be expected directly. `xpt.deterministic.deterministic(test_id, root=None)` is a context manager that pins them and yields a `Pinned` handle. The pytest plugin wraps it as the `xpt_deterministic` fixture, which passes the node id and `rootpath`, and `--xpt-deterministic` requests that fixture from an autouse fixture for every test. The module does not import pytest, so `unittest` uses it through `enterContext`.
+
+Patched while the block runs:
+
+- `time.time` and `time.time_ns` read the pinned clock, which starts at 2000-01-01T00:00:00 UTC and moves only through `Pinned.advance(seconds)`. It is held as integer nanoseconds, so repeated advances don't drift.
+- `datetime.datetime` and `datetime.date` in the `datetime` module are replaced by subclasses whose `now`, `utcnow`, `today`, and `date.today` read the clock. Naive results are UTC wall time, so a test reads the same in every time zone. The subclasses' `__new__` returns real `datetime` and `date` objects, so recorded values, `type(value)`, pickling, and arithmetic are unchanged, and a metaclass makes `isinstance` and `issubclass` accept real instances.
+- `uuid.uuid4` and `uuid.uuid1` return `UUID(int=n, version=v)` from a counter per version, starting at 1, so the first `uuid4()` is `00000000-0000-4000-8000-000000000001`. Their arguments are ignored.
+- `random` is seeded with `f"xpt:{test_id}"`. A string seed is hashed with SHA-512, so the sequence does not depend on `PYTHONHASHSEED`. The generator's state is saved on entry and restored on exit, so the test does not shift the sequence of code that runs after it.
+- Modules whose file is under `root`, outside hidden directories, `site-packages`, `dist-packages`, `node_modules`, and the standard library, and not part of xpt, pytest, pluggy, or xdist, have every global that is one of the originals rebound to its stand-in. This covers `from datetime import datetime` and `from time import time` in the code under test, which is how most projects import them. The walk is over `sys.modules` once per test and touches only project modules, which is cheaper than freezegun's walk of every module.
+
+Restoration is a `finally` that puts back every attribute it replaced, in reverse, then the random state. Nesting raises `RuntimeError`, since two blocks would fight over one global clock. xdist workers are separate processes and the seed comes from the node id, so a test pins the same values on any worker.
+
+Not patched, on purpose:
+
+- `time.monotonic`, `time.perf_counter`, and `time.sleep`. Timeouts, retries, and pytest's durations need them to move.
+- `time.localtime`, `time.gmtime`, `time.strftime`, and `time.ctime` with no argument, `datetime.datetime.fromtimestamp`, and `os.urandom`, `secrets`, and `random.SystemRandom`.
+- Installed packages and the standard library that imported a name directly, and C code that calls the clock without going through the module attribute. They see the real values.
+- Third-party clocks such as `pendulum` or `arrow`.
+- Code that compares `type(x) is datetime.datetime` while the block runs, which sees the stand-in class.
+- Other threads are not isolated: the patch is process-wide while the block runs.
+
+Open questions, resolved:
+
+- **Delegate to freezegun or time-machine when installed?** No. Both would be an optional code path with its own behavior, so a test would pin different things depending on what else is installed, and the result on CI could differ from a laptop. freezegun walks the loaded modules on each start, which adds up when applied to every test, and time-machine is a compiled extension. The goal here is narrower: stable values for the handful of standard-library sources most tests touch, with no dependency. A test that needs C-level freezing can use time-machine directly instead of the fixture.
+- **Warn when `PYTHONHASHSEED` is unset and a value depends on set order?** Not yet. Telling whether a recorded value depends on set or dict iteration order needs the same test run under two seeds, which one session can't do cheaply. The flaky report already finds the paths after two runs and suggests `unordered=True`. A warning tied to the fixture is a follow-up.
+
 ## Reporting
 
 When xpt is installed, it replaces pytest's terminal output. Agents read every byte of a test run, and pytest's header, progress dots, rules, and full tracebacks spend tokens without saying more. The report stays readable for people, so it is the default. `--xpt-report=pytest`, or `XPT_REPORT=pytest`, keeps pytest's own output.
@@ -484,7 +513,7 @@ Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, becaus
 - **Rubber-stamping.** The tool makes accepting cheap, so agents will accept regressions. Mitigations: no bulk accept by default, the diff shown at accept time, `--dry-run`, and refusing suspect values without `--force`. The benchmark (M5) measures how often wrong accepts happen. We do not claim to prevent them.
 - **Dynamic call sites.** `expect` called through a helper reports the helper's frame. We support `expect(..., _depth=1)` the way expecttest supports `skip`. A call created through `functools.partial` or `exec` has no source to rewrite. We record it as unsupported for rewriting, and the comparison still runs.
 - **Generated or non-file sources** (doctests, notebooks, `python -c`): same as above.
-- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets, `unordered=` covers lists, `ignore=` covers volatile dict entries, and adapters cover the rest. `xpt flaky` finds the paths that need them from the stored runs, and accept refuses them. Default `repr` of arbitrary objects is never used, because it embeds addresses.
+- **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets, `unordered=` covers lists, `ignore=` covers volatile dict entries, and adapters cover the rest. `xpt flaky` finds the paths that need them from the stored runs, and accept refuses them. `xpt_deterministic` pins the clock, `random`, and `uuid` in the standard library so the values don't vary in the first place. Default `repr` of arbitrary objects is never used, because it embeds addresses.
 - **Large values.** Records are capped at 1 MB per observation by default. Larger values are recorded as a hash plus a summary and cannot be inline-accepted.
 - **Sensitive data.** `.xpt/` holds real values from test runs. It is gitignored on creation, pruned to 5 runs, and removed by `xpt clean`. The README says so plainly.
 - **Python 3.11 floor** excludes 3.10 users. 3.10 is end of life, so this is acceptable.
@@ -507,7 +536,7 @@ Recorded values may also use helpers reached through `expect`, so a file that im
 
 `expect.output(capsys)` expects captured stdout and stderr, or a `CompletedProcess`, as lists of lines (see Expecting output).
 
-pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, `--xpt-json PATH`, and `--xpt-deterministic`. The plugin's fixture is `xpt_deterministic` (see Deterministic tests). unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 

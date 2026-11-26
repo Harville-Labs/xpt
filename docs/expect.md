@@ -76,6 +76,8 @@ expect(list_rows(), [{"v": 1}, {"v": 2}], ignore=['value[...]["id"]'])
 expect(load(), Config(meta={"host": "a"}), ignore=['value.meta["pid"]'])
 ```
 
+When the volatile value is a timestamp, a UUID, or a random choice, the [`xpt_deterministic`](pytest.md#deterministic-tests) fixture can pin it instead, so you can expect it rather than ignore it.
+
 `[...]` matches every item of a list or tuple and every value of a dict. A path can pass through a dataclass field with `.name`, and a key can be a string, a number, a bool, or `None`. xpt removes the named entries from both sides before it compares, so the expected value may leave them out, and the value xpt writes when you accept leaves them out too. A path that names nothing in the value is fine; it ignores nothing.
 
 Only dict entries can be ignored. A path that ends at a list item fails and suggests `unordered=True` or a key inside the items. A path that ends at a dataclass or model field fails too, because xpt must write every field to rebuild the object; expect `dataclasses.asdict(value)` or a dict of the fields you care about instead. These errors appear only when the call fails, since a call whose values are already equal returns before the paths are applied. A path xpt can't read, such as one not starting at `value` or one with a tuple key, raises `ValueError` and shows how to write one.
@@ -246,4 +248,4 @@ The comparison still runs in each case, so the test still fails or passes correc
 
 ## Without pytest
 
-`expect` works in plain `unittest` and in scripts. Without the pytest plugin, xpt records under the current directory and writes the run when the process exits. `XPT_NO_RECORD=1` turns recording off.
+`expect` works in plain `unittest` and in scripts. Without the pytest plugin, xpt records under the current directory and writes the run when the process exits. `XPT_NO_RECORD=1` turns recording off. `with xpt.deterministic.deterministic(test_id):` pins the clock, `random`, and `uuid` as the [`xpt_deterministic`](pytest.md#deterministic-tests) fixture does.

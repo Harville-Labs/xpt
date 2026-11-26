@@ -339,7 +339,7 @@ A skip's `line` is `null` when the whole file was skipped.
 
 ## Affected
 
-`xpt affected --json` prints the selection. See [`xpt affected`](cli.md#xpt-affected----command-arg-).
+`xpt affected --json` prints the selection. See [`xpt affected`](cli.md#xpt-affected-command-arg).
 
 ```json
 {

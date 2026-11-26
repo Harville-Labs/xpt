@@ -13,6 +13,7 @@ nav = [
     { "Reviewing failures" = "review.md" },
     { "pytest report" = "pytest.md" },
     { "Tracebacks outside pytest" = "traceback.md" },
+    { "Probing a line" = "probe.md" },
     { "Coding agents" = "agents.md" },
     { "MCP server" = "mcp.md" },
   ] },

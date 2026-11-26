@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import apiview, convert, decisions, env, flaky, init, render, trace, traceback
+from xpt import apiview, convert, decisions, env, flaky, init, probe, render, trace, traceback
 from xpt.accept import AcceptError, AcceptResult, accept, lock
 from xpt.changed import ChangedCode, Diff, changed_code
 from xpt.changes import GitError, changes
@@ -330,6 +330,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
     sub = commands.add_parser("mcp", help="serve the review commands as MCP tools over stdio")
     sub.add_argument("--root", type=Path, default=Path(), help="the project root (default: .)")
+    commands.add_parser(
+        "probe", help="record the values at one line while a command runs", usage=probe.USAGE
+    )
     return parser
 
 
@@ -344,6 +347,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(encoding="utf-8")
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["probe"]:
+        return probe.main(argv[1:])
     try:
         args = _parser().parse_args(argv)
         if args.command == "run":

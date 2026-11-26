@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import linecache
+import os
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from xpt import decisions, flaky, frames, record, report, trace
+from xpt import decisions, flaky, frames, record, report, trace, uncovered
 from xpt.accept import Accepted, after_session
 from xpt.deterministic import Pinned, deterministic
 from xpt.diff import diff
@@ -24,6 +25,10 @@ _COMPARED = pytest.StashKey[tuple[Value, Value] | None]()
 _MODE = pytest.StashKey[str]()
 _TRACER = pytest.StashKey[trace.Tracer]()
 _TRACED = pytest.StashKey[dict[str, trace.Lines]]()
+_COVERAGE = pytest.StashKey[Path]()
+_SESSION: list[trace.Tracer] = []
+"""The tracer `xpt coverage` started in this process, so a pytest run inside it, such as an
+inline pytester run, does not start a second one."""
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -73,6 +78,25 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_load_initial_conftests(early_config: pytest.Config) -> None:
+    """Under `xpt coverage`, start tracing every project line before conftest files import
+    the project, so module bodies count."""
+    directory = os.environ.get(uncovered.ENV)
+    if not directory or _SESSION:
+        return
+    tracer = trace.Tracer(early_config.rootpath, session=True)
+    try:
+        tracer.start()
+    except trace.TraceError as error:
+        raise pytest.UsageError(f"xpt coverage can't trace: {error}") from None
+    _SESSION.append(tracer)
+    early_config.stash[_TRACER] = tracer
+    early_config.stash[_COVERAGE] = Path(directory)
+    early_config.add_cleanup(_SESSION.clear)
+    early_config.add_cleanup(tracer.stop)
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_configure(config: pytest.Config) -> None:
     _check_writes(config)
@@ -97,26 +121,32 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def _start_trace(config: pytest.Config) -> None:
+    config.stash[_TRACED] = {}
+    if _TRACER in config.stash:
+        return
     tracer = trace.Tracer(config.rootpath)
     try:
         tracer.start()
     except trace.TraceError as error:
         raise pytest.UsageError(f"--xpt-trace can't start: {error}") from None
     config.stash[_TRACER] = tracer
-    config.stash[_TRACED] = {}
     config.add_cleanup(tracer.stop)
 
 
 def _finish_trace(config: pytest.Config) -> None:
-    """Stop tracing and store the lines of each test that recorded an observation."""
+    """Stop tracing, store the lines of each test that recorded an observation, and under
+    `xpt coverage` every line the session ran."""
     tracer = config.stash.get(_TRACER, None)
     if tracer is None:
         return
     tracer.stop()
-    traced = config.stash[_TRACED]
+    traced = config.stash.get(_TRACED, None)
     rec = record.recorder
     if traced and rec.enabled:
         trace.write(rec.root, rec.run, rec.worker, traced, tracer.definitions())
+    directory = config.stash.get(_COVERAGE, None)
+    if directory is not None:
+        uncovered.write(directory, config.rootpath, tracer.everything(), tracer.imported())
 
 
 def _groups(root: Path, run: str) -> tuple[Group, ...]:
@@ -173,6 +203,8 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
     test = record.base_nodeid(item.nodeid)
     record.recorder.test = test
     tracer = item.config.stash.get(_TRACER, None)
+    if _TRACED not in item.config.stash:
+        tracer = None
     if tracer is not None:
         tracer.begin()
     try:

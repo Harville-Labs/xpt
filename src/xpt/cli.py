@@ -11,7 +11,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import apiview, convert, decisions, env, flaky, init, probe, render, trace, traceback
+from xpt import (
+    apiview,
+    convert,
+    decisions,
+    env,
+    flaky,
+    init,
+    probe,
+    render,
+    trace,
+    traceback,
+    uncovered,
+)
 from xpt.accept import AcceptError, AcceptResult, accept, lock
 from xpt.changed import ChangedCode, Diff, changed_code
 from xpt.changes import GitError, changes
@@ -232,6 +244,42 @@ def api_command(args: argparse.Namespace, root: Path) -> Output:
     return Output(0, apiview.lines(result), apiview.to_json(result))
 
 
+def coverage_command(args: argparse.Namespace, root: Path) -> Output:
+    command = list(args.argv[1:] if args.argv[:1] == ["--"] else args.argv)
+    if args.from_coverage is not None and command:
+        raise UsageError(
+            "--from-coverage reads coverage.py's data and runs nothing, so give no command."
+        )
+    if args.from_coverage is None and not command:
+        raise UsageError(
+            "xpt coverage needs a pytest command, as in xpt coverage -- pytest, "
+            "or --from-coverage to read coverage.py's .coverage file."
+        )
+    root = root.resolve()
+    try:
+        diff = changes(root, args.since)
+    except GitError as error:
+        raise UsageError(
+            f"xpt coverage reports changed lines from git, and {error}. "
+            "Run it inside a git repository with git installed."
+        ) from None
+    files = uncovered.changed_files(root, diff)
+    source: uncovered.Source = "xpt" if args.from_coverage is None else "coverage.py"
+    tests: int | None = None
+    stale: list[str] = []
+    if not files:
+        executed = uncovered.Executed({})
+    elif args.from_coverage is None:
+        tests, executed = uncovered.run(command, root)
+    else:
+        data = args.from_coverage if args.from_coverage.is_absolute() else root / args.from_coverage
+        executed = uncovered.read_coverage_py(data, root)
+        stale = uncovered.edited_after(root, files, data.stat().st_mtime)
+    found = uncovered.report(files, executed, diff.since, source, tests=tests, stale=stale)
+    code = 1 if found.not_run or tests else 0
+    return Output(code, uncovered.lines(found, full=args.full), uncovered.to_json(found))
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise UsageError(f"{message}. Run {self.prog} --help for usage.")
@@ -260,7 +308,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = _Parser(
         prog="xpt",
         description="Review, accept, and reject recorded expect() failures, set a project up "
-        "for xpt, and convert assert-equals tests.",
+        "for xpt, convert assert-equals tests, and list changed lines no test ran.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -328,6 +376,27 @@ def _parser() -> argparse.ArgumentParser:
         help="raise the limits; -vv prints Python's full traceback",
     )
     sub.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
+    sub = add(
+        "coverage",
+        coverage_command,
+        "run pytest and list the changed lines no test ran, grouped by function",
+        since,
+    )
+    sub.usage = (
+        "xpt coverage [--since REF] [--json] [--full] "
+        "(-- PYTEST [ARG ...] | --from-coverage [PATH])"
+    )
+    sub.add_argument("--full", action="store_true", help="lift the line and length limits")
+    sub.add_argument(
+        "--from-coverage",
+        nargs="?",
+        const=Path(".coverage"),
+        type=Path,
+        metavar="PATH",
+        help="read the lines that ran from coverage.py's data file (default: .coverage) "
+        "instead of running a command",
+    )
+    sub.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
     sub = commands.add_parser("mcp", help="serve the review commands as MCP tools over stdio")
     sub.add_argument("--root", type=Path, default=Path(), help="the project root (default: .)")
     commands.add_parser(
@@ -366,6 +435,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         convert.ConvertError,
         init.InitError,
         apiview.ApiError,
+        uncovered.CoverageError,
     ) as error:
         print(f"xpt: error: {error}", file=sys.stderr)
         return 2

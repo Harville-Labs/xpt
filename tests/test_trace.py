@@ -61,6 +61,24 @@ def test_each_context_records_a_line_again(tracer: trace.Tracer, tmp_path: Path)
     assert tracer.end() == {}
 
 
+def test_a_session_tracer_keeps_every_line_across_contexts(tmp_path: Path):
+    if sys.gettrace() is not None:
+        pytest.skip("Python 3.11 allows one tracer, and this run already has one.")
+    (tmp_path / "shop.py").write_text(MODULE, encoding="utf-8")
+    tracer = trace.Tracer(tmp_path, session=True)
+    tracer.start()
+    try:
+        shop = load(tmp_path / "shop.py")
+        tracer.begin()
+        shop.total(1)
+        tracer.end()
+        shop.unused()
+    finally:
+        tracer.stop()
+    assert tracer.everything() == {"shop.py": frozenset({1, 4, 5, 6, 9, 10})}
+    assert tracer.imported() == frozenset()
+
+
 def test_code_outside_the_root_is_not_recorded(tmp_path: Path):
     if sys.gettrace() is not None:
         pytest.skip("Python 3.11 allows one tracer, and this run already has one.")

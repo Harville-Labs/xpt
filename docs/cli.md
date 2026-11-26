@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env,api,probe} [options]
+xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,coverage,run,mcp,env,api,probe} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -13,7 +13,7 @@ xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env,api,p
 | `--json` | all | Print one JSON object on stdout. See [JSON output](json.md). |
 | `--root ROOT` | all but `api` and `run` | The project root. Default `.`. |
 | `--run RUN` | `failures`, `show`, `accept`, `reject` | A run id from `xpt runs`. Default the latest run. |
-| `--since REF` | `show`, `accept` | The git ref to diff the changed code against. Default the merge base with the default branch, or `HEAD`. See [Changed code](#changed-code). |
+| `--since REF` | `show`, `accept`, `coverage` | The git ref to diff the changed code against. Default the merge base with the default branch, or `HEAD`. See [Changed code](#changed-code). |
 
 ## Commands
 
@@ -244,6 +244,36 @@ The first line is the package and its installed version, from `importlib.metadat
 | `--limit N` | List at most `N` names, counting each member. Default 80, `0` for all. The output ends with how many were left out. |
 | `--import` | Import the module and read what its source and stubs can't show with `inspect`. This runs the module's code. |
 
+### `xpt coverage`
+
+```text
+xpt coverage [--since REF] [--full] -- PYTEST [ARG ...]
+xpt coverage [--since REF] [--full] --from-coverage [PATH]
+```
+
+Run a pytest command and list the changed lines no test ran, grouped by function, with the source of each:
+
+```text
+$ xpt coverage -- pytest
+src/app/load.py read_rows: 2 of 9 changed lines not run
+  31 |         if row.get("count") is None:
+  32 |             raise ValueError("missing count")
+2 of 9 changed lines not run, in 1 function (since main).
+```
+
+- The changed lines are `git diff` against `--since REF`, with the same default and the same staged, unstaged, and untracked `.py` files as [Changed code](#changed-code).
+- Only lines that hold code count, so blank lines, comments, and `else:` never show. When no changed line holds code, it says `No changed lines with code (since main).` and runs nothing.
+- The command runs from the root, with its output on stderr. Give the whole pytest command, such as `xpt coverage -- uv run pytest -n 4`. The xpt plugin traces every project line the session runs, in every xdist worker, through `XPT_COVERAGE`. It needs no recording under `.xpt/`, but the plugin must load, so `PYTEST_DISABLE_PLUGIN_AUTOLOAD` must be unset. A command that traces no lines is a usage error.
+- When every changed line ran, it prints `All changed lines ran: 9 lines (since main).`
+- When pytest exits nonzero, a line says so, and the exit code is `1`, because a failing test may stop before lines it would have run.
+- Lines run by other processes the tests start are not counted. Branches that were never taken are not reported yet.
+- On Python 3.11 tracing uses `sys.settrace`, so it can't run beside coverage.py or a debugger, and it slows in-process tests down. On 3.12 and later it costs one callback per line for the session.
+
+| Option | Meaning |
+|---|---|
+| `--from-coverage [PATH]` | Read the lines that ran from coverage.py's data file, `.coverage` under the root by default, instead of running a command. coverage.py need not be installed to read it. A changed file the data does not cover is named on a `not in the coverage data, left out:` line, and one edited after the data was written on a `changed since the coverage data, left out:` line. |
+| `--full` | Lift the limits of 10 lines of 80 characters per function. |
+
 ### `xpt run [-v] -- COMMAND [ARG ...]`
 
 Run a command so that every Python process it starts prints uncaught exceptions in the compact shape of the pytest report, described in [Tracebacks outside pytest](traceback.md). It sets `XPT_TRACEBACK` and puts a `sitecustomize` module that installs the hooks first on `PYTHONPATH`. The exit code is the command's, and 127 when it can't be started. `--json` and `--root` do not apply.
@@ -277,8 +307,8 @@ Run a command and record the values at one line of a Python file in every Python
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
-| `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, an `init` check found a problem, or `env` found a problem or no module `NAME`. |
-| `2` | A usage error, such as `xpt run` without a command, an `xpt probe` line that can never run, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, an `api` target that is not installed or not found, unpaired markers in `AGENTS.md`, or a malformed `.mcp.json` with `init --mcp`. The error is one line on stderr that says what to do next, and nothing is written. |
+| `1` | `failures` found failures, `flaky` found flaky call sites, `coverage` found changed lines no test ran or pytest failed, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, an `init` check found a problem, or `env` found a problem or no module `NAME`. |
+| `2` | A usage error, such as `xpt run` without a command, an `xpt probe` line that can never run, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, an `api` target that is not installed or not found, unpaired markers in `AGENTS.md`, a malformed `.mcp.json` with `init --mcp`, or `coverage` outside a git repository, with a command that traced no lines, or with a file that is not coverage.py data. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files
 

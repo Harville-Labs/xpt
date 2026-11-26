@@ -43,6 +43,7 @@ xpt accept a81f       # write the actual value into the test source
 xpt accept --all      # every acceptable call site that was not rejected
 xpt reject a81f       # the actual value is a bug; stop offering it for acceptance
 xpt flaky             # values that change between runs with no source change
+xpt coverage -- pytest  # changed lines no test ran, grouped by function
 xpt runs              # recorded runs, newest first
 xpt clean             # delete .xpt/
 ```

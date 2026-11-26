@@ -58,6 +58,8 @@ xpt convert tests     # rewrite assert x == literal as expect(x, literal)
 
 When an import error or a wrong-API failure looks like an environment problem, `xpt env` names the interpreter and prints only what is wrong: a local `json.py` shadowing the standard library, or an installed version that differs from `uv.lock`, `poetry.lock`, or `requirements*.txt`. `xpt env requests` says where `import requests` comes from without importing it. See the [CLI reference](https://harville-labs.github.io/xpt/cli/#xpt-env-name).
 
+`xpt api httpx.Client` lists compact signatures for the installed version of a package, read from its source and stubs without importing it, so an agent can check an API before calling it.
+
 `pytest --expect-create` runs the tests, then fills every missing expectation the same way `xpt accept --missing` does. It writes after the session ends, never during it, and never replaces an existing expected value. The footer names what it wrote and suggests `xpt accept` only for what remains:
 
 ```

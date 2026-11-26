@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env} [options]
+xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env,api} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -11,7 +11,7 @@ xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env} [opt
 | Option | Commands | Meaning |
 |---|---|---|
 | `--json` | all | Print one JSON object on stdout. See [JSON output](json.md). |
-| `--root ROOT` | all | The project root. Default `.`. |
+| `--root ROOT` | all but `api` and `run` | The project root. Default `.`. |
 | `--run RUN` | `failures`, `show`, `accept`, `reject` | A run id from `xpt runs`. Default the latest run. |
 | `--since REF` | `show`, `accept` | The git ref to diff the changed code against. Default the merge base with the default branch, or `HEAD`. See [Changed code](#changed-code). |
 
@@ -216,6 +216,34 @@ json from /usr/lib/python3.12/json/__init__.py (standard library)
 
 It exits `1` when the module is not found, or when it would come from a project file that shadows the standard library or an installed package, which it reports on a second `shadowing:` line.
 
+### `xpt api TARGET`
+
+List compact signatures for the installed version of a package, module, class, function, or method, so an agent can check an API before it calls it. `TARGET` is a dotted name: `httpx`, `json.dumps`, `pathlib.Path`, or `argparse.ArgumentParser.add_argument`.
+
+```text
+$ xpt api json --grep decode
+json stdlib (Python 3.11.18)
+JSONDecoder(*, object_hook=None, parse_float=None, parse_int=None, parse_constant=None, ...)  Simple JSON <https://json.org> decoder
+  .decode(s, _w=WHITESPACE.match)  Return the Python representation of `s` (a `str` instance containing...
+  .raw_decode(s, idx=0)  Decode a JSON document from `s` (a `str` beginning with a JSON...
+JSONDecodeError(msg, doc, pos)  Subclass of ValueError with the following additional properties:
+```
+
+The first line is the package and its installed version, from `importlib.metadata`. Then one line per public name: its signature and the first sentence of its docstring. A class's line shows its constructor, and its public methods and properties follow, indented and starting with `.`, including those it inherits from classes in the same package. An overloaded function has a line per overload. A module listed as a name says `module` and its dotted name.
+
+- **Public names** are the module's `__all__`, or else the names without a leading underscore that the module defines or re-exports from its own package. A name explicitly targeted, such as `json._default_decoder`, is shown even when private.
+- **Short form.** Past 80 characters a signature drops its optional parameters, leaving one `...`, and the annotations of its required parameters, which it always keeps. A default longer than 20 characters prints as `...`. Annotations lose `typing.` prefixes, and long subscripts fold to `[...]`. `--json` keeps everything.
+- **No code runs by default.** xpt finds the module's files with the import system's finders, without importing it, and reads them with `ast`. A `.pyi` stub next to the source, or in a `<package>-stubs` package, is read instead of the source. Branches on `sys.version_info` and `sys.platform` follow the running Python.
+- **What the source can't show** is listed as `unresolved` with the reason, and a last line counts them: a name bound at import time, such as one added through `globals()`, or one re-exported from an extension module with no stub. A module with no Python source, such as `math`, prints only a note. `--import` imports the module and reads those names with `inspect.signature`, which runs the module's code.
+- **The environment is the interpreter's.** xpt reads the packages installed for the Python that runs it. Run it as `uv run xpt api` or `python -m xpt api` from the project's environment, not from a tool environment.
+
+| Option | Meaning |
+|---|---|
+| `--depth N` | Also list submodules, `N` levels deep. Each name is listed once, under the first module that exposes it. |
+| `--grep WORD` | Only names that contain `WORD`, ignoring case. A class is kept with only its matching members when its own name doesn't match. |
+| `--limit N` | List at most `N` names, counting each member. Default 80, `0` for all. The output ends with how many were left out. |
+| `--import` | Import the module and read what its source and stubs can't show with `inspect`. This runs the module's code. |
+
 ### `xpt run [-v] -- COMMAND [ARG ...]`
 
 Run a command so that every Python process it starts prints uncaught exceptions in the compact shape of the pytest report, described in [Tracebacks outside pytest](traceback.md). It sets `XPT_TRACEBACK` and puts a `sitecustomize` module that installs the hooks first on `PYTHONPATH`. The exit code is the command's, and 127 when it can't be started. `--json` and `--root` do not apply.
@@ -239,7 +267,7 @@ Serve `failures`, `show`, `accept`, `reject`, `runs`, and `flaky` as MCP tools o
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
 | `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, an `init` check found a problem, or `env` found a problem or no module `NAME`. |
-| `2` | A usage error, such as `xpt run` without a command, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, unpaired markers in `AGENTS.md`, or a malformed `.mcp.json` with `init --mcp`. The error is one line on stderr that says what to do next, and nothing is written. |
+| `2` | A usage error, such as `xpt run` without a command, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, an `api` target that is not installed or not found, unpaired markers in `AGENTS.md`, or a malformed `.mcp.json` with `init --mcp`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files
 

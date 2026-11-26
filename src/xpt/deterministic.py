@@ -19,7 +19,7 @@ from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from xpt.sources import SKIPPED_DIRS
 
@@ -155,8 +155,41 @@ _PATCHES: tuple[tuple[Any, str, object, object], ...] = (
 _STAND_INS = {id(real): fake for _, _, real, fake in _PATCHES}
 
 
+class Patcher(Protocol):
+    """What applies and later undoes each patch, as pytest's `monkeypatch` does."""
+
+    def setattr(self, target: Any, name: str, value: object) -> None: ...
+
+    def setitem(self, dic: Any, name: str, value: object) -> None: ...
+
+
+class _Undo:
+    """A `Patcher` that remembers each original so `undo` can put them back, newest first."""
+
+    def __init__(self) -> None:
+        self._saved: list[tuple[Any, str, object, bool]] = []
+
+    def setattr(self, target: Any, name: str, value: object) -> None:
+        self._saved.append((target, name, getattr(target, name), False))
+        setattr(target, name, value)
+
+    def setitem(self, dic: Any, name: str, value: object) -> None:
+        self._saved.append((dic, name, dic[name], True))
+        dic[name] = value
+
+    def undo(self) -> None:
+        while self._saved:
+            target, name, original, item = self._saved.pop()
+            if item:
+                target[name] = original
+            else:
+                setattr(target, name, original)
+
+
 @contextmanager
-def deterministic(test_id: str, *, root: Path | None = None) -> Generator[Pinned]:
+def deterministic(
+    test_id: str, *, root: Path | None = None, patcher: Patcher | None = None
+) -> Generator[Pinned]:
     """Pin `random`, `uuid.uuid1`, `uuid.uuid4`, and the clock until the block exits.
 
     `random` is seeded from `test_id`, so each test has its own fixed sequence. `uuid4` counts
@@ -170,33 +203,32 @@ def deterministic(test_id: str, *, root: Path | None = None) -> Generator[Pinned
     directly, as in `from datetime import datetime`, are rebound too. Installed packages, the
     standard library, and C code keep what they imported. Everything is restored on exit,
     also when the block raises.
+
+    With `patcher`, such as pytest's `monkeypatch`, every patch goes through it and it undoes
+    them, so patches the test makes on top unwind in the right order. The random state and
+    the clock are still reset when the block exits.
     """
     global _active
     if _active is not None:
         raise RuntimeError("deterministic() is already active. Leave the outer block first.")
-    undo: list[tuple[Any, str, object]] = []
+    own = _Undo()
+    patch: Patcher = own if patcher is None else patcher
     state = random.getstate()
     try:
         for owner, name, real, fake in _PATCHES:
             if getattr(owner, name) is real:
-                undo.append((owner, name, real))
-                setattr(owner, name, fake)
+                patch.setattr(owner, name, fake)
         for module in _project_modules(Path(os.path.abspath(Path.cwd() if root is None else root))):
             for name, value in list(module.items()):
                 fake = _STAND_INS.get(id(value))
                 if fake is not None:
-                    undo.append((module, name, value))
-                    module[name] = fake
+                    patch.setitem(module, name, fake)
         random.seed(f"xpt:{test_id}")
         _active = Pinned(test_id)
         yield _active
     finally:
         _active = None
-        for owner, name, original in reversed(undo):
-            if isinstance(owner, dict):
-                owner[name] = original
-            else:
-                setattr(owner, name, original)
+        own.undo()
         random.setstate(state)
 
 

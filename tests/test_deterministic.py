@@ -229,3 +229,59 @@ def test_the_option_records_the_same_value_under_xdist(
     pytester.makeini("[pytest]\npythonpath = .\n")
     first = run(pytester, monkeypatch, "1", "--xpt-deterministic")
     assert run(pytester, monkeypatch, "2", "--xpt-deterministic", "-n", "2") == first
+
+
+PATCHING_CONFTEST = """\
+import datetime
+import time
+import uuid
+from pathlib import Path
+
+REAL = (time.time, time.time_ns, datetime.datetime, datetime.date, uuid.uuid4)
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    now = (time.time, time.time_ns, datetime.datetime, datetime.date, uuid.uuid4)
+    with Path("restored.txt").open("a", encoding="utf-8") as out:
+        out.write(f"{nodeid} {now == REAL}\\n")
+"""
+
+PATCHING_TEST = """\
+import time
+
+
+def fake():
+    return 5.0
+
+
+def test_monkeypatch_first(monkeypatch, xpt_deterministic):
+    assert time.time() == 946_684_800.0
+    monkeypatch.setattr(time, "time", fake)
+    assert time.time() == 5.0
+
+
+def test_monkeypatch_after(xpt_deterministic, monkeypatch):
+    monkeypatch.setattr(time, "time", fake)
+    assert time.time() == 5.0
+
+
+def test_monkeypatch_only(monkeypatch):
+    monkeypatch.setattr(time, "time", fake)
+    assert time.time() == 5.0
+"""
+
+
+@pytest.mark.parametrize("args", [(), ("--xpt-deterministic",)], ids=["fixture", "option"])
+def test_a_test_that_monkeypatches_the_clock_leaves_the_real_one_behind(
+    pytester: pytest.Pytester, args: tuple[str, ...]
+):
+    pytester.makeconftest(PATCHING_CONFTEST)
+    pytester.makepyfile(test_it=PATCHING_TEST)
+    pytester.makeini("[pytest]\n")
+    pytester.runpytest_subprocess("-p", "no:cacheprovider", *args).assert_outcomes(passed=3)
+    lines = (pytester.path / "restored.txt").read_text(encoding="utf-8").splitlines()
+    assert lines == [
+        "test_it.py::test_monkeypatch_first True",
+        "test_it.py::test_monkeypatch_after True",
+        "test_it.py::test_monkeypatch_only True",
+    ]

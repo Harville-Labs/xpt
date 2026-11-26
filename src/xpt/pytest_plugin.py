@@ -143,8 +143,13 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
 
 @pytest.fixture
 def xpt_deterministic(request: pytest.FixtureRequest) -> Generator[Pinned, None, None]:
-    """Pin time, random, and uuid for this test. Call `.advance(seconds)` to move the clock."""
-    with deterministic(request.node.nodeid, root=request.config.rootpath) as pinned:
+    """Pin time, random, and uuid for this test. Call `.advance(seconds)` to move the clock.
+
+    The patches go through the test's `monkeypatch`, so they unwind in order with the test's
+    own patches whichever fixture comes first."""
+    monkeypatch = request.getfixturevalue("monkeypatch")
+    root = request.config.rootpath
+    with deterministic(request.node.nodeid, root=root, patcher=monkeypatch) as pinned:
         yield pinned
 
 

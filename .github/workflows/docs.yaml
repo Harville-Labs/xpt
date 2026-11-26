@@ -3,8 +3,6 @@ name: docs
 on:
   push:
     branches: [main]
-  pull_request:
-    paths: [docs/**, zensical.toml, scripts/llms.py, .github/workflows/docs.yaml]
   workflow_dispatch:
 
 permissions:

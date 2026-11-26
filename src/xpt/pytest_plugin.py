@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from xpt import decisions, record, report
+from xpt import decisions, flaky, record, report
 from xpt.accept import Accepted, after_session
 from xpt.diff import diff
 from xpt.expect import ExpectationFailed
@@ -87,7 +87,8 @@ def _groups(root: Path, run: str) -> tuple[Group, ...]:
         rejected = decisions.load_rejections(root)
     except record.RecordError:
         rejected = frozenset()
-    return decisions.mark(group(record.load_run(root, run)), rejected)
+    groups = decisions.mark(group(record.load_run(root, run)), rejected)
+    return flaky.mark(groups, flaky.find(flaky.load_history(root), run))
 
 
 def _accept_ids(config: pytest.Config) -> tuple[str, ...]:
@@ -233,7 +234,7 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     config = session.config
     if hasattr(config, "workerinput"):
         return
-    record.recorder.finish()
+    record.recorder.finish(source=True)
     ids = _accept_ids(config)
     create = config.getoption("expect_create")
     if not ids and not create:

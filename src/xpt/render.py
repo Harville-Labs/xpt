@@ -6,6 +6,7 @@ from collections.abc import Iterable, Sequence
 from xpt.accept import AcceptResult
 from xpt.decisions import FILE, RejectOutcome
 from xpt.diff import Change, Diff
+from xpt.flaky import Volatile
 from xpt.group import Group
 from xpt.path import format_path
 from xpt.report import MAX_CHANGES, MAX_CHARS, changes, show
@@ -42,10 +43,21 @@ def group_lines(g: Group, *, verbose: bool = False, full: bool = False) -> Lines
         if full and g.expected is not None:
             lines.append(f"  expected: {show(g.expected, width)}")
             lines.append(f"  actual: {show(g.actuals[0], width)}")
-        return lines + changes(found, limit=limit, width=width) + _note(g)
-    if g.status == "missing":
-        return [*lines, f"  actual: {show(g.actuals[0], width)}", *_note(g)]
-    return [*lines, f"  {g.detail}"]
+        lines += changes(found, limit=limit, width=width) + _note(g)
+    elif g.status == "missing":
+        lines += [f"  actual: {show(g.actuals[0], width)}", *_note(g)]
+    else:
+        lines.append(f"  {g.detail}")
+    return lines + flaky_lines(g.volatile, limit)
+
+
+def flaky_lines(found: Sequence[Volatile], limit: int | None = MAX_CHANGES) -> Lines:
+    """One `flaky:` line per volatile path, with the option that would keep it stable."""
+    shown = found if limit is None else found[:limit]
+    lines = [f"  flaky: {v.reason}" for v in shown]
+    if hidden := len(found) - len(shown):
+        lines.append(f"  ... {_count(hidden, 'more flaky path')}")
+    return lines
 
 
 def _note(g: Group) -> Lines:
@@ -96,10 +108,39 @@ def accept_lines(
         return [*lines, f"{done} {counts}. Next: run the tests, then xpt failures."]
     if suspects:
         force = f"xpt accept{run_option} --force {' '.join(suspects)}"
-        return [*lines, f"{done} {counts}. Next: fix the code under test, or run {force}."]
+        return [*lines, f"{done} {counts}. Next: {_fix(result.outcomes)}, or run {force}."]
     if verified:
         return [*lines, f"{done} {counts}."]
     return [*lines, f"{done} {counts}. Next: run the tests."]
+
+
+def _fix(outcomes: Sequence[Outcome]) -> str:
+    flaky = [bool(o.group.volatile) for o in outcomes if o.status == "suspect"]
+    if all(flaky):
+        return "make the tests deterministic"
+    if any(flaky):
+        return "fix the code under test or make the tests deterministic"
+    return "fix the code under test"
+
+
+FlakySite = tuple[str, CallSite, tuple[Volatile, ...]]
+
+
+def flaky_sites_lines(sites: Sequence[FlakySite], runs: int) -> Lines:
+    """`xpt flaky`: each call site with volatile paths, and a footer."""
+    stored = _count(runs, "stored run")
+    if not sites:
+        return [f"No flaky call sites in {stored}."]
+    lines = []
+    for id, site, found in sites:
+        compared = max(len(v.runs) for v in found)
+        lines.append(f"{heading(id, site, 'flaky')}  {_count(compared, 'run')}")
+        lines += flaky_lines(found, None)
+    return [
+        *lines,
+        f"{_count(len(sites), 'flaky call site')} in {stored}. "
+        "Next: add the suggested options to the tests, then run them again.",
+    ]
 
 
 def rerun_lines(rerun: Rerun) -> Lines:
@@ -176,6 +217,7 @@ def group_json(g: Group) -> dict[str, Json]:
         "tests": list(g.tests),
         "detail": g.detail,
         "actuals": [to_json(v) for v in g.actuals],
+        "flaky": [volatile_json(v) for v in g.volatile],
     }
     if g.expected is not None:
         data["expected"] = to_json(g.expected)
@@ -184,6 +226,26 @@ def group_json(g: Group) -> dict[str, Json]:
         data["changes"] = [change_json(c) for c in found.changes]
         data["unchanged"] = found.unchanged
     return data
+
+
+def volatile_json(v: Volatile) -> dict[str, Json]:
+    return {
+        "path": format_path(v.path),
+        "kind": v.kind,
+        "values": v.values,
+        "runs": list(v.runs),
+        "spread": v.spread,
+        "suggestion": v.suggestion,
+    }
+
+
+def flaky_site_json(id: str, site: CallSite, found: Sequence[Volatile]) -> dict[str, Json]:
+    return {
+        "id": id,
+        "site": site_json(site),
+        "run": found[0].runs[-1],
+        "flaky": [volatile_json(v) for v in found],
+    }
 
 
 def change_json(c: Change, *, labeled: bool = False) -> dict[str, Json]:

@@ -87,7 +87,7 @@ def only_run(pytester: pytest.Pytester) -> Path:
 def observed_by_worker(pytester: pytest.Pytester) -> dict[str, set[str]]:
     return {
         f.stem: {json.loads(line)["test"] for line in f.read_text(encoding="utf-8").splitlines()}
-        for f in only_run(pytester).iterdir()
+        for f in only_run(pytester).glob("*.jsonl")
     }
 
 

@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,clean,init,convert} [options]
+xpt {failures,show,accept,reject,runs,flaky,clean,init,convert} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -53,6 +53,15 @@ Accept refuses an actual value that looks like a failure rather than a result, a
 
 A missing expectation has no expected value, so only the `exception` rule applies to it. `--all`, `--missing`, and `pytest --expect-create` refuse the same values. Fix the code under test, or pass `--force` with the ids when the value is right.
 
+Accept also refuses, as `suspect` with the rule `flaky`, a value whose paths changed between stored runs with no source change (see [`xpt flaky`](#xpt-flaky)). The reason names the paths and the options that would keep them stable:
+
+```text
+7f3a  tests/test_order.py:7  suspect
+  value["created_at"], value["tags"] changed between 2 runs with no source change (rule: flaky). Consider ignore=['value["created_at"]'], unordered=True, or accept it with --force if it is right.
+```
+
+Add the options to the test and run it again, or pass `--force` with the ids when the value is right.
+
 ### `xpt reject ID [ID ...]`
 
 Record actual values as bugs, so xpt stops offering them for acceptance.
@@ -60,6 +69,28 @@ Record actual values as bugs, so xpt stops offering them for acceptance.
 ### `xpt runs`
 
 List recorded runs, newest first.
+
+### `xpt flaky`
+
+List the call sites whose actual value changed between stored runs while the source stayed the same, with the paths that changed and the option that would keep each one stable. It exits `1` when it finds one.
+
+```text
+7f3a  tests/test_order.py:7  flaky  2 runs
+  flaky: value["created_at"] looks like a timestamp and had 2 values in 2 runs with no source change. Consider ignore=['value["created_at"]'].
+  flaky: value["tags"] had its items in 2 orders in 2 runs with no source change. Consider unordered=True.
+1 flaky call site in 2 stored runs. Next: add the suggested options to the tests, then run them again.
+```
+
+Two runs count when they recorded the call site with the same expected argument and the same project source. The pytest plugin stores a digest of every `.py` file under the root with each run, so a value that changed because the code changed is not called flaky. Any edit starts the comparison over.
+
+| Kind | The values at the path | Suggestion |
+|---|---|---|
+| `timestamp` | Strings that look like a date or time. | `ignore=['value["created_at"]']` |
+| `value` | Any other change, such as an id. | `ignore=` the path, with list indexes as `[...]`. A path that is not a dict entry can't be ignored, so make it deterministic in the test. |
+| `order` | A list with the same items in another order. | `unordered=True` |
+| `float` | Numbers that differ by a little. | `atol=` the spread, rounded up. |
+
+`xpt failures`, `xpt show`, and the pytest report print the same `flaky:` lines under the call site's diff, and leave the call site out of `Next: xpt accept`.
 
 ### `xpt clean`
 
@@ -112,7 +143,7 @@ Asserts that are not an `==` comparison are left alone without a report. A file 
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
-| `1` | `failures` found failures, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, or an `init` check found a problem. |
+| `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, or an `init` check found a problem. |
 | `2` | A usage error, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, or unpaired markers in `AGENTS.md`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files
@@ -121,6 +152,7 @@ Asserts that are not an `==` comparison are left alone without a report. A file 
 .xpt/
   .gitignore            "*", written on first use
   runs/<run>/<worker>.jsonl
+  runs/<run>/source     the project source digest, for xpt flaky
   latest                the id of the newest complete run
   decisions.jsonl       rejections, one per line
   accept.lock           held while accept or reject writes

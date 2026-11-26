@@ -40,6 +40,7 @@ xpt show a81f         # one call site, with its function and tests
 xpt accept a81f       # write the actual value into the test source
 xpt accept --all      # every acceptable call site that was not rejected
 xpt reject a81f       # the actual value is a bug; stop offering it for acceptance
+xpt flaky             # values that change between runs with no source change
 xpt runs              # recorded runs, newest first
 xpt clean             # delete .xpt/
 ```

@@ -62,6 +62,7 @@ def test_failures_json_carries_every_group_with_values_and_changes(
                 "tests": ["tests/test_a.py::test_a[1]", "tests/test_a.py::test_a[2]"],
                 "detail": "",
                 "actuals": [{"dict": {"op": "sub", "n": 1}}],
+                "flaky": [],
                 "expected": {"dict": {"op": "add", "n": 1}},
                 "changes": [
                     {"path": 'value["op"]', "op": "replace", "expected": "add", "actual": "sub"}
@@ -77,6 +78,7 @@ def test_failures_json_carries_every_group_with_values_and_changes(
                 "tests": ["tests/test_a.py::test_b"],
                 "detail": "",
                 "actuals": ["héllo"],
+                "flaky": [],
             },
             {
                 "id": "c9cc",
@@ -87,6 +89,7 @@ def test_failures_json_carries_every_group_with_values_and_changes(
                 "tests": ["tests/test_b.py::test_c[1]", "tests/test_b.py::test_c[2]"],
                 "detail": CONFLICT_DETAIL,
                 "actuals": [1, 2],
+                "flaky": [],
             },
             {
                 "id": None,
@@ -97,6 +100,7 @@ def test_failures_json_carries_every_group_with_values_and_changes(
                 "tests": ["tests/test_c.py::test_d"],
                 "detail": LOST_DETAIL,
                 "actuals": [3],
+                "flaky": [],
             },
         ],
     }

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 from xpt.accept import Accepted, AcceptResult
 from xpt.decisions import Rejection, mark
 from xpt.diff import Diff, diff
 from xpt.failure import Compared, Expected, Failure, Raised, Text, Where, where_json
+from xpt.flaky import Volatile
+from xpt.flaky import mark as mark_flaky
 from xpt.group import Group, group
-from xpt.render import accept_json, change_json, group_json, outcome_lines
+from xpt.render import accept_json, change_json, flaky_lines, group_json, outcome_lines
 from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
 from xpt.rewrite import Outcome
 from xpt.site import CallSite, SiteKey, Unlocatable
@@ -46,7 +48,8 @@ def limits(verbosity: int) -> Limits:
 @dataclass(frozen=True, slots=True)
 class Session:
     """A finished pytest session, as the report needs it. `created` and `accepted` are what
-    `--expect-create` and `--expect-accept` wrote after the session, None without the flag."""
+    `--expect-create` and `--expect-accept` wrote after the session, None without the flag.
+    `flaky` holds the volatile paths of the run's call sites, found against earlier runs."""
 
     failures: tuple[Failure, ...]
     counts: tuple[str, ...]
@@ -56,12 +59,13 @@ class Session:
     rejected: frozenset[Rejection] = frozenset()
     created: AcceptResult | None = None
     accepted: Accepted | None = None
+    flaky: Mapping[SiteKey, tuple[Volatile, ...]] = field(default_factory=dict)
 
 
 def expect_groups(session: Session) -> dict[SiteKey, Group]:
     found = session.failures
     observations = [d.observation for f in found if isinstance(d := f.where.detail, Expected)]
-    groups = mark(group(observations), session.rejected)
+    groups = mark_flaky(mark(group(observations), session.rejected), session.flaky)
     return {g.site.key: g for g in groups if not isinstance(g.site, Unlocatable)}
 
 
@@ -267,10 +271,12 @@ def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
                 return [*lines, f"  {cut(o.detail, lim.message)}"]
             note = [f"  {cut(o.detail, lim.message)}"] if o.detail else []
             if o.expected is not None and o.actual is not None:
-                return lines + _changes(o.options.diff(o.expected, o.actual), lim) + note
-            if o.actual is not None:
-                return [*lines, f"  actual: {show(o.actual, lim.width)}", *note]
-            return [*lines, f"  {cut(o.detail, lim.message)}"]
+                lines += _changes(o.options.diff(o.expected, o.actual), lim) + note
+            elif o.actual is not None:
+                lines += [f"  actual: {show(o.actual, lim.width)}", *note]
+            else:
+                lines.append(f"  {cut(o.detail, lim.message)}")
+            return lines + (flaky_lines(g.volatile, lim.changes) if g else [])
         case Compared():
             found = diff(detail.left, detail.right)
             return _changes(found, lim, labeled=True)

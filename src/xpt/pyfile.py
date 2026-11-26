@@ -4,6 +4,7 @@ import ast
 import io
 import re
 import tokenize
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 _NEWLINE = re.compile(rb"\r\n|\r|\n")
@@ -57,3 +58,37 @@ def read(path: str, data: bytes, command: str) -> PyFile | str:
     )
     newline = first.group().decode("ascii") if first else "\n"
     return PyFile(path, data, text, tree, starts, newline, comments)
+
+
+def import_edit(source: PyFile, lines: Sequence[str]) -> tuple[int, bytes]:
+    """Where to insert import `lines`, and the bytes to insert: after the leading docstring
+    and imports, or above the first statement."""
+    body = source.tree.body
+    newline = source.newline.encode()
+    text = [line.encode("utf-8") for line in lines]
+    lead = 1 if body and _docstring(body[0]) else 0
+    while lead < len(body) and isinstance(body[lead], ast.Import | ast.ImportFrom):
+        lead += 1
+    if lead == 0:
+        first = body[0]
+        decorators = getattr(first, "decorator_list", [])
+        at = source.offset(min([first.lineno, *(d.lineno for d in decorators)]), 0)
+        return at, b"".join(t + newline for t in text)
+    anchor = body[lead - 1]
+    if lead < len(body) and body[lead].lineno == anchor.end_lineno:
+        _, end = source.span(anchor)
+        return end, b"".join(b"; " + t for t in text)
+    if (anchor.end_lineno or anchor.lineno) >= len(source.starts):
+        end = len(source.data)
+        missing = b"" if source.data.endswith((b"\n", b"\r")) else newline
+        return end, missing + b"".join(t + newline for t in text)
+    at = source.starts[anchor.end_lineno or anchor.lineno]
+    return at, b"".join(t + newline for t in text)
+
+
+def _docstring(node: ast.stmt) -> bool:
+    return (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )

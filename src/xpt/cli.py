@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import convert, decisions, env, flaky, init, render, trace, traceback
+from xpt import apiview, convert, decisions, env, flaky, init, render, trace, traceback
 from xpt.accept import AcceptError, AcceptResult, accept, lock
 from xpt.changed import ChangedCode, Diff, changed_code
 from xpt.changes import GitError, changes
@@ -225,9 +225,22 @@ def env_command(args: argparse.Namespace, root: Path) -> Output:
     return Output(*env.command(root, args.name, os.environ))
 
 
+def api_command(args: argparse.Namespace, root: Path) -> Output:
+    result = apiview.listing(
+        args.target, args.depth, args.grep, args.limit, use_import=args.use_import
+    )
+    return Output(0, apiview.lines(result), apiview.to_json(result))
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise UsageError(f"{message}. Run {self.prog} --help for usage.")
+
+
+def _json_only() -> _Parser:
+    parent = _Parser(add_help=False)
+    parent.add_argument("--json", action="store_true", help="print one JSON object")
+    return parent
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -285,6 +298,24 @@ def _parser() -> argparse.ArgumentParser:
     sub = add("env", env_command, "report the interpreter, shadowed modules, and lockfile drift")
     sub.add_argument("name", nargs="?", help="a module to locate without importing it")
     sub = commands.add_parser(
+        "api",
+        help="list compact signatures of an installed package, module, class, or function",
+        parents=[_json_only()],
+    )
+    sub.set_defaults(handler=api_command, root=Path())
+    sub.add_argument("target", help="a dotted name, as in json, json.dumps, or pathlib.Path")
+    sub.add_argument("--depth", type=int, default=0, help="also list submodules this deep")
+    sub.add_argument("--grep", metavar="WORD", help="only names that contain WORD")
+    sub.add_argument(
+        "--limit", type=int, default=apiview.LIMIT, help="most names to list, 0 for all"
+    )
+    sub.add_argument(
+        "--import",
+        dest="use_import",
+        action="store_true",
+        help="import the module to read what its source and stubs can't show; runs its code",
+    )
+    sub = commands.add_parser(
         "run",
         help="run a command whose Python processes print compact tracebacks",
         usage="xpt run [-v] -- command [arg ...]",
@@ -322,7 +353,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             return mcp.main(args.root)
         output: Output = args.handler(args, args.root)
-    except (UsageError, RecordError, AcceptError, convert.ConvertError, init.InitError) as error:
+    except (
+        UsageError,
+        RecordError,
+        AcceptError,
+        convert.ConvertError,
+        init.InitError,
+        apiview.ApiError,
+    ) as error:
         print(f"xpt: error: {error}", file=sys.stderr)
         return 2
     if args.json:

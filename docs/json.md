@@ -237,6 +237,58 @@ A skip's `line` is `null` when the whole file was skipped.
 
 `kind` is `file`, `namespace` (with `locations` and no `origin`), `built-in`, `frozen`, or `missing`. `shadows` names what a project file hides, as in `the standard library module json`, and is null otherwise.
 
+## Api
+
+`xpt api --json` returns the same names as the text, under the same `--grep` and `--limit`, with each signature in full and its parameters one by one.
+
+```json
+{
+  "schema_version": 1,
+  "command": "api",
+  "target": "json.dumps",
+  "package": "json",
+  "version": null,
+  "stdlib": true,
+  "python": "3.11.18",
+  "modules": [
+    {
+      "name": "json",
+      "doc": "",
+      "entries": [
+        {
+          "name": "dumps",
+          "kind": "function",
+          "module": "json",
+          "resolved": "static",
+          "signatures": [
+            {
+              "text": "(obj, *, skipkeys=False, ..., sort_keys=False, **kw)",
+              "params": [
+                {"name": "obj", "kind": "positional", "annotation": null, "default": null},
+                {"name": "skipkeys", "kind": "keyword_only", "annotation": null, "default": "False"}
+              ],
+              "returns": null
+            }
+          ],
+          "doc": "Serialize `obj` to a JSON formatted `str`."
+        }
+      ]
+    }
+  ],
+  "more": 0,
+  "unresolved": 0,
+  "notes": []
+}
+```
+
+- `version` is the installed distribution's version, and null for the standard library or a module no distribution names.
+- `modules` holds the target module and, with `--depth`, its submodules. `doc` is a submodule's first docstring sentence.
+- `kind` is `function`, `class`, `method`, `property`, `variable`, `module`, or `unresolved`. `module` is where the name is defined, which differs from the section for a re-export.
+- `resolved` is `static` when read from source or stubs, `import` when read with `--import`, and `none` for an unresolved name, whose `reason` says why.
+- `signatures` holds one item per overload, and is null when the constructor can't be read statically. A parameter's `kind` is `positional_only`, `positional`, `var_positional`, `keyword_only`, or `var_keyword`. Annotations and defaults are source text. `async` is true for a coroutine function.
+- `value` is a variable's annotation and value as text, a property's type, or a module entry's dotted name. `members` lists a class's methods, properties, and enum members.
+- `more` counts the names `--limit` left out. `notes` holds the text lines that follow the names.
+
 ## Runs
 
 ```json

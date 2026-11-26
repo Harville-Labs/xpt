@@ -31,6 +31,10 @@ Pass `expected` as the second positional argument or as `expected=`. When accept
 | NumPy arrays and scalars, PyTorch tensors | Written as `np.array([...], dtype="float32")` or `torch.tensor([...], dtype=torch.float32)`. An array over 10,000 elements is written as a digest instead (see [Large arrays](#large-arrays)). Complex dtypes are written with `complex(...)` elements. A tensor on a device other than the CPU adds `device="mps:0"`. A NumPy scalar is recorded as the Python number it holds. |
 | pandas `Series` and `DataFrame` | Written as `pd.Series([...], dtype=..., name=..., index=[...])` and `pd.DataFrame({"col": [...]})`. A default index is left out. A named index, or one whose dtype pandas would not infer, is written as `pd.Index([...], dtype=..., name=...)`, and a multi-level one as `pd.MultiIndex.from_tuples([...], names=[...])`. Multi-level columns are tuple keys. A frame column whose dtype `pd.DataFrame` would not infer from its values is refused. |
 | Exceptions | Written as `ValueError("bad")`: the exact type and its `args`. One with `__notes__`, or one whose class can't be rebuilt by calling it with its `args`, is written as `expect.exception(ValueError, "bad", notes=["..."])`. See [Exceptions](#exceptions). |
+| `datetime`, `date`, `time`, `timedelta`, `timezone` | Written as `datetime(2000, 1, 1, 12, tzinfo=timezone.utc)`, `date(2000, 1, 1)`, `time(9, 30)`, and `timedelta(days=1, seconds=30)`. Trailing zero arguments are left out. A `tzinfo` is `timezone.utc`, a fixed offset such as `timezone(timedelta(seconds=3600))`, or a `ZoneInfo("Europe/London")` by its key; any other `tzinfo` is refused. |
+| `uuid.UUID`, `decimal.Decimal` | Written as `UUID("...")` and `Decimal("1.10")`. A decimal keeps its exponent, so `Decimal("1.10")` is not written as `Decimal("1.1")`, although the two compare equal. A decimal NaN equals a NaN of the same kind, like `float("nan")`. |
+| `pathlib` paths | `Path`, `PosixPath`, and `WindowsPath` are written as `Path("a/b")` with forward slashes, so the test builds the same path on every system. `PurePosixPath` and `PureWindowsPath` keep their flavour: `PureWindowsPath("C:/a")`. |
+| Enum members | Written by name, `Color.RED`, for `Enum`, `IntEnum`, `StrEnum`, and `Flag`. A member with no name of its own, such as a combination of flags, is written as a call, `Perm(3)`. |
 | Pydantic models, attrs classes, protobuf messages | Written as a constructor call with keyword arguments: Pydantic by field alias, plus extra fields; attrs by `__init__` alias; protobuf by the fields that are set. A protobuf message that sets extensions is wrapped as `expect.with_extensions(msg, extensions={"pkg.name": value})`. |
 
 Anything else fails with a message that names where the value is and its type:
@@ -40,7 +44,7 @@ value["handler"] is a builtins:builtin_function_or_method; xpt cannot record it.
 Register its class with xpt.register or expect a field of it instead.
 ```
 
-For any other type, expect a field or a plain conversion of the value, for example `expect(str(path))` or `expect(dataclasses.asdict(obj))`.
+For any other type, expect a field or a plain conversion of the value, for example `expect(str(value))` or `expect(dataclasses.asdict(obj))`.
 
 ### Your own classes
 
@@ -58,11 +62,11 @@ Register at import time, in the module that defines the class or in `conftest.py
 
 xpt has no dependency on NumPy, PyTorch, pandas, Pydantic, attrs, or protobuf. It recognizes their types by class name and never imports them, so there is nothing extra to install.
 
-Subclasses of builtins, such as an `IntEnum` member, are refused rather than recorded as their base type, because writing `1` where the code returns `Color.RED` would hide a real difference. A value that contains itself is refused and the message names the path to the cycle.
+Other subclasses of builtins and of the standard-library types above are refused rather than recorded as their base type, because writing `"a"` where the code returns `Name("a")` would hide a real difference. Enum members are the exception: `Color.RED` is written by name, never as its value. A value that contains itself is refused and the message names the path to the cycle.
 
 ## Comparison
 
-A call passes when `actual == expected`. Arrays, tensors, and pandas objects are the exception, because their `==` compares element by element: they pass only when both sides have the same type, shape, and dtype and every element is equal. A tensor must also be on the same device, and a pandas object must have an equal index, with the same names and dtype. `nan` equals `nan`, both as a plain float and as an array element in the same place, so a recorded `float("nan")` passes. Lists, tuples, dicts, and dataclasses that hold arrays are compared item by item the same way. When it fails, the diff and the grouping of repeated calls use the same structural equality, so `1` and `1.0` are equal. A dataclass is compared field by field, and its class must be the same.
+A call passes when `actual == expected`. Arrays, tensors, and pandas objects are the exception, because their `==` compares element by element: they pass only when both sides have the same type, shape, and dtype and every element is equal. A tensor must also be on the same device, and a pandas object must have an equal index, with the same names and dtype. `nan` equals `nan`, both as a plain float and as an array element in the same place, so a recorded `float("nan")` passes. Lists, tuples, dicts, and dataclasses that hold arrays are compared item by item the same way. When it fails, the diff and the grouping of repeated calls use the same structural equality, so `1` and `1.0` are equal. A dataclass is compared field by field, and its class must be the same. Dates, times, and durations are diffed by field too, as in `value["created_at"].hour: 8 -> 9`, and a time zone that only one side has reads as added or removed at `.tzinfo`. A UUID, decimal, path, time zone, or enum member is diffed as one value: `value["id"]: UUID("...1") -> UUID("...2")`.
 
 ### Tolerances
 
@@ -205,7 +209,9 @@ xpt writes a dataclass by its class name, for example `Order(id=7, items=["apple
 2. `import shop` or `import shop as s`, which writes `shop.Order(...)` or `s.Order(...)`.
 3. Any other module-level binding of the name `Order`, such as a class statement or an assignment.
 
-Arrays and tensors work the same way, so a file with `import numpy as np` gets `np.array(...)` and a file with `import torch` gets `torch.tensor(..., dtype=torch.float32)`. When the file has none of these, the accept is skipped and the reason names the import to add.
+Arrays, tensors, and enum members work the same way, so a file with `import numpy as np` gets `np.array(...)` and a file with `import torch` gets `torch.tensor(..., dtype=torch.float32)`. When the file has none of these, the accept is skipped and the reason names the import to add.
+
+The standard-library types above are the exception: when the file has no way to name `datetime`, `timezone`, `UUID`, `Decimal`, `Path`, `PurePosixPath`, `PureWindowsPath`, or `ZoneInfo`, accept adds the import, as in `from datetime import datetime, timezone`, after the file's leading imports. It doesn't add one that would shadow a name the file already uses anywhere, such as a local variable called `UUID`, or when the file has a `from ... import *`; that accept is skipped with the reason. The new line isn't sorted with the others, so run `ruff check --fix` or isort afterwards if the project checks import order.
 
 ## Output
 

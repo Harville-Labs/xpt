@@ -5,6 +5,7 @@ from collections.abc import Hashable
 from dataclasses import dataclass, field
 from typing import Literal
 
+from xpt import native
 from xpt.path import Attr, Index, Key, Path, field_path
 from xpt.tolerance import EXACT, Tolerance
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Ref, Seq, Set, Str, Value
@@ -58,6 +59,8 @@ def norm(value: Value) -> Hashable:
             return value.v
         case Null():
             return None
+        case Dataclass(native.DECIMAL, (("", Str(text)),)):
+            return native.decimal_key(text)
         case Seq(kind, items):
             return (kind, tuple(norm(i) for i in items))
         case Set(_, items):
@@ -122,6 +125,8 @@ class _Walk:
                             self.changes.append(Change((*path, Key(k)), "remove", v, None))
                 for k, v in theirs_items.values():
                     self.changes.append(Change((*path, Key(k)), "add", None, v))
+            case Dataclass(et, _), Dataclass(at, _) if et == at and native.whole(e):
+                self.changes.append(Change(path, "replace", e, a))
             case Dataclass(et, ef), Dataclass(at, af) if et == at:
                 theirs_fields = dict(af)
                 for name, ev in ef:

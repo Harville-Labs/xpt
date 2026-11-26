@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from decimal import Decimal
 from typing import Any
 
 from xpt import adapters, digest, errors
@@ -13,7 +14,8 @@ def equal(a: Any, b: Any, tol: Tolerance = EXACT) -> bool:
     """Python's ==, except that arrays and frames must match in type, shape, and dtype.
 
     Exceptions that compare by identity are equal when their type, args, and notes are.
-    NaN equals NaN, so a recorded float("nan") passes against a NaN result. `tol` lets
+    NaN equals NaN, so a recorded float("nan") passes against a NaN result, and a Decimal NaN
+    equals a Decimal NaN of the same kind. `tol` lets
     floats and complex parts of `a`, the actual value, differ from `b`, the expected one.
 
     Lists, tuples, dicts, and dataclasses are compared item by item so an array inside one
@@ -34,6 +36,8 @@ def equal(a: Any, b: Any, tol: Tolerance = EXACT) -> bool:
         return same
     if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
         return True
+    if isinstance(a, Decimal) and isinstance(b, Decimal) and a.is_nan() and b.is_nan():
+        return a.is_snan() == b.is_snan()
     if tol and (close := _close(a, b, tol)) is not None:
         return close
     kind = type(a)

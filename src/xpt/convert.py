@@ -271,30 +271,8 @@ def _imports_expect(tree: ast.Module) -> bool:
 
 def _import(source: PyFile) -> _Edit:
     """Add the import after the leading docstring and imports, or above the first statement."""
-    body = source.tree.body
-    lead = 1 if _docstring(body[0]) else 0
-    while lead < len(body) and isinstance(body[lead], ast.Import | ast.ImportFrom):
-        lead += 1
-    line = IMPORT.encode("ascii")
-    if lead == 0:
-        first = body[0]
-        decorators = getattr(first, "decorator_list", [])
-        at = source.offset(min([first.lineno, *(d.lineno for d in decorators)]), 0)
-        return _Edit(at, at, line + source.newline.encode())
-    anchor, following = body[lead - 1], body[lead]
-    _, end = source.span(anchor)
-    if following.lineno == anchor.end_lineno:
-        return _Edit(end, end, b"; " + line)
-    at = source.starts[anchor.end_lineno or anchor.lineno]
-    return _Edit(at, at, line + source.newline.encode())
-
-
-def _docstring(node: ast.stmt) -> bool:
-    return (
-        isinstance(node, ast.Expr)
-        and isinstance(node.value, ast.Constant)
-        and isinstance(node.value.value, str)
-    )
+    at, text = pyfile.import_edit(source, [IMPORT])
+    return _Edit(at, at, text)
 
 
 def lines(result: ConvertResult, dry_run: bool, retry: str) -> list[str]:

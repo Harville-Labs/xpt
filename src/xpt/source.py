@@ -4,6 +4,7 @@ import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from xpt import native
 from xpt.literal import float_literal, quote
 from xpt.path import POSITIONAL, Index, Key, Path, field_path
 from xpt.unsupported import UnsupportedValue
@@ -121,7 +122,7 @@ class _Printer:
                 )
                 return _Group("{", labelled, "}")
             case Dataclass(type_id, fields):
-                labelled = tuple(c for f, v in fields for c in _fields(f, v, path))
+                labelled = _arguments(type_id, fields, path)
                 return _Group(f"{self.named(type_id, path)}(", labelled, ")")
         return None
 
@@ -130,6 +131,17 @@ class _Printer:
         if name is None:
             raise UnsupportedValue(path, f"is a {type_id} that is not importable by name")
         return name
+
+
+def _arguments(
+    type_id: str, fields: tuple[tuple[str, Value], ...], path: Path
+) -> tuple[_Child, ...]:
+    """A constructor call's arguments, written as `native.arguments` says for the standard
+    library types it knows."""
+    if type_id in native.SIGNATURES:
+        written = native.arguments(type_id, fields)
+        return tuple(_Child(label, v, field_path(path, name)) for label, name, v in written)
+    return tuple(c for f, v in fields for c in _fields(f, v, path))
 
 
 def _fields(name: str, value: Value, path: Path) -> tuple[_Child, ...]:

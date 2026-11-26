@@ -6,8 +6,9 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from xpt import layout, pyfile
+from xpt import layout, native, pyfile
 from xpt.group import Group
+from xpt.pyfile import PyFile
 from xpt.site import Unlocatable, arg_sha, expected_arg, find_call, in_with, scopes_in
 from xpt.source import display_width, to_source
 from xpt.value import Dataclass, Dict, Ref, Seq, Set, Value
@@ -34,9 +35,12 @@ class Rewrite:
 
 @dataclass(frozen=True, slots=True)
 class _Edit:
+    """Bytes to put in place of `start:end`, and the (module, name) imports they need."""
+
     start: int
     end: int
     text: bytes
+    imports: frozenset[tuple[str, str]] = frozenset()
 
 
 class _Unwritable(Exception):
@@ -54,6 +58,13 @@ class _File:
     comments: tuple[int, ...]
     imported: frozenset[str]
     modules: dict[str, str]
+    source: PyFile
+    used: frozenset[str]
+    star: bool
+
+    def can_import(self, name: str) -> bool:
+        """Whether a module-level import of `name` would bind nothing the file uses."""
+        return not self.star and name not in self.used
 
     def offset(self, line: int, col: int) -> int:
         return self.starts[line - 1] + col
@@ -78,7 +89,8 @@ def rewrite(path: str, data: bytes, groups: Sequence[Group]) -> Rewrite:
         return Rewrite(data, tuple(Outcome(g, "skipped", file) for g in groups))
     planned = [_plan(file, g) for g in groups]
     outcomes = [o for o, _ in planned]
-    body, lowest = file.data, len(file.data) + 1
+    kept: list[_Edit] = []
+    lowest = len(file.data) + 1
     for i, (_, edit) in sorted(enumerate(planned), key=lambda p: _start(p[1][1]), reverse=True):
         if edit is None:
             continue
@@ -86,7 +98,14 @@ def rewrite(path: str, data: bytes, groups: Sequence[Group]) -> Rewrite:
             reason = f"{path}: this call overlaps another accepted call. Accept them one at a time."
             outcomes[i] = Outcome(outcomes[i].group, "skipped", reason)
             continue
-        body, lowest = body[: edit.start] + edit.text + body[edit.end :], edit.start
+        kept.append(edit)
+        lowest = edit.start
+    if needed := {i for edit in kept for i in edit.imports}:
+        at, text = pyfile.import_edit(file.source, _import_lines(needed))
+        kept.append(_Edit(at, at, text))
+    body = file.data
+    for edit in sorted(kept, key=lambda e: e.start, reverse=True):
+        body = body[: edit.start] + edit.text + body[edit.end :]
     new = bom + body
     try:
         compile(new, path, "exec", dont_inherit=True)
@@ -97,6 +116,13 @@ def rewrite(path: str, data: bytes, groups: Sequence[Group]) -> Rewrite:
         )
         return Rewrite(data, tuple(_unless_accepted(o, reason) for o in outcomes))
     return Rewrite(new, tuple(outcomes))
+
+
+def _import_lines(needed: set[tuple[str, str]]) -> list[str]:
+    modules: dict[str, set[str]] = {}
+    for module, name in needed:
+        modules.setdefault(module, set()).add(name)
+    return [f"from {m} import {', '.join(sorted(names))}" for m, names in sorted(modules.items())]
 
 
 def _start(edit: _Edit | None) -> int:
@@ -125,7 +151,30 @@ def _read(path: str, data: bytes) -> _File | str:
         source.comments,
         imported,
         _modules(tree),
+        source,
+        frozenset(_used(tree)),
+        any(
+            isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names) for n in tree.body
+        ),
     )
+
+
+def _used(tree: ast.Module) -> Iterator[str]:
+    """Every name the file binds or reads anywhere, which an added import must not shadow."""
+    for node in ast.walk(tree):
+        match node:
+            case ast.Name(id=name) | ast.arg(arg=name) | ast.MatchStar(name=str(name)):
+                yield name
+            case ast.FunctionDef(name=name) | ast.AsyncFunctionDef(name=name):
+                yield name
+            case ast.ClassDef(name=name) | ast.ExceptHandler(name=str(name)):
+                yield name
+            case ast.MatchAs(name=str(name)) | ast.MatchMapping(rest=str(name)):
+                yield name
+            case ast.Global(names=names) | ast.Nonlocal(names=names):
+                yield from names
+            case ast.alias(name=name, asname=asname):
+                yield asname or name.partition(".")[0]
 
 
 def _module_names(tree: ast.Module) -> Iterator[str]:
@@ -193,12 +242,17 @@ def _edit(file: _File, call: ast.Call, value: Value, where: str) -> _Edit:
             f"{where} has no plain first argument, "
             "so xpt cannot tell where the expected value goes."
         )
-    names = _names(file, value, where)
+    names, imports = _names(file, value, where)
     start = file.offset(call.lineno, call.col_offset)
     end = file.offset(call.end_lineno or call.lineno, call.end_col_offset or 0)
+    if imports and start < pyfile.import_edit(file.source, [])[0]:
+        raise _Unwritable(
+            f"{where} needs an import that xpt would add below the call. "
+            "Add it above the call and accept again."
+        )
     if _rebuildable(file, call, start, end):
         text = layout.layout(_call(file, call, value, start, end, names))
-        return _Edit(start, end, _encode(file, text))
+        return _Edit(start, end, _encode(file, text), imports)
     expected = expected_arg(call)
     if expected is None and block:
         func_end = file.offset(call.func.end_lineno or 0, call.func.end_col_offset or 0)
@@ -206,7 +260,7 @@ def _edit(file: _File, call: ast.Call, value: Value, where: str) -> _Edit:
         before = file.before(at)
         literal = to_source(value, len(_leading(before)), column=display_width(before), names=names)
         comma = ", " if call.keywords else ""
-        return _Edit(at, at, _encode(file, literal + comma))
+        return _Edit(at, at, _encode(file, literal + comma), imports)
     if expected is None:
         actual = call.args[0]
         at = file.offset(actual.end_lineno or actual.lineno, actual.end_col_offset or 0)
@@ -214,12 +268,12 @@ def _edit(file: _File, call: ast.Call, value: Value, where: str) -> _Edit:
         literal = to_source(
             value, len(_leading(before)), column=display_width(before) + 2, names=names
         )
-        return _Edit(at, at, _encode(file, ", " + literal))
+        return _Edit(at, at, _encode(file, ", " + literal), imports)
     at = file.offset(expected.lineno, expected.col_offset)
     stop = file.offset(expected.end_lineno or expected.lineno, expected.end_col_offset or 0)
     before = file.before(at)
     literal = to_source(value, len(_leading(before)), column=display_width(before), names=names)
-    return _Edit(at, stop, _encode(file, literal))
+    return _Edit(at, stop, _encode(file, literal), imports)
 
 
 def _rebuildable(file: _File, call: ast.Call, start: int, end: int) -> bool:
@@ -272,24 +326,45 @@ def _encode(file: _File, text: str) -> bytes:
     return text.replace("\n", file.newline).encode("utf-8")
 
 
-def _names(file: _File, value: Value, where: str) -> dict[str, str]:
-    return {type_id: _name(file, type_id, where) for type_id in sorted(set(_type_ids(value)))}
+def _names(
+    file: _File, value: Value, where: str
+) -> tuple[dict[str, str], frozenset[tuple[str, str]]]:
+    """The name each type in `value` is written by, and the imports to add for them."""
+    names: dict[str, str] = {}
+    imports: set[tuple[str, str]] = set()
+    for type_id in sorted(set(_type_ids(value))):
+        names[type_id], needed = _name(file, type_id, where)
+        if needed is not None:
+            imports.add(needed)
+    return names, frozenset(imports)
 
 
-def _name(file: _File, type_id: str, where: str) -> str:
+def _name(file: _File, type_id: str, where: str) -> tuple[str, tuple[str, str] | None]:
+    """The name for `type_id` in this file, and the import to add for it, if any.
+
+    A standard-library type that `native` records, such as `datetime`, is imported when the
+    file uses no name it would bind. Any other type must already be importable by name.
+    """
     module, _, qualname = type_id.partition(":")
     head, dot, rest = qualname.partition(".")
     if module == "builtins":
-        return qualname
+        return qualname, None
     if imported := file.modules.get(f"{module}.{head}"):
-        return imported + dot + rest
+        return imported + dot + rest, None
     if alias := file.modules.get(module):
-        return f"{alias}.{qualname}"
+        return f"{alias}.{qualname}", None
     if head in file.imported:
-        return qualname
+        return qualname, None
+    if type_id in native.IMPORTS and file.can_import(head):
+        return qualname, (module, head)
+    shadowed = (
+        f", and adding the import would shadow a name {file.path} already uses"
+        if type_id in native.IMPORTS
+        else ""
+    )
     raise _Unwritable(
         f"{where} needs the name {qualname} from {module}, which {file.path} does not import "
-        f"at module level. Import {module} or {head} and accept again."
+        f"at module level{shadowed}. Import {module} or {head} and accept again."
     )
 
 

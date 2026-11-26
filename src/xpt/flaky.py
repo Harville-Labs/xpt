@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path as FilePath
 from typing import Literal
 
+from xpt import native
 from xpt.diff import norm
 from xpt.group import Group, group
 from xpt.literal import quote
@@ -238,6 +239,12 @@ def _differ(a: Value, b: Value, path: Path) -> Iterator[tuple[Path, Kind]]:
                 else:
                     yield (*path, Key(k)), "value"
             yield from (((*path, Key(k)), "value") for k, _ in bi if norm(k) not in mine)
+        case Dataclass(at, _), Dataclass(bt, _) if at == bt and at in native.TIMESTAMPS:
+            yield path, "timestamp"
+        case Dataclass(native.UUID, _), Dataclass(native.UUID, _):
+            yield path, "uuid"
+        case Dataclass(at, _), Dataclass(bt, _) if at == bt and native.whole(a):
+            yield path, "value"
         case Dataclass(at, af), Dataclass(bt, bf) if at == bt:
             theirs_fields = dict(bf)
             for name, v in af:

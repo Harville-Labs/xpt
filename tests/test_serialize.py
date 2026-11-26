@@ -1,7 +1,6 @@
 import json
 import math
 from dataclasses import dataclass, field
-from enum import IntEnum
 
 import pytest
 from hypothesis import given
@@ -93,11 +92,11 @@ def test_an_unsupported_type_names_the_path_and_the_type():
 
 
 def test_builtin_subclasses_are_unsupported():
-    class Color(IntEnum):
-        RED = 1
+    class Name(str):
+        pass
 
-    with pytest.raises(UnsupportedValue, match="Color"):
-        serialize([Color.RED])
+    with pytest.raises(UnsupportedValue, match="Name"):
+        serialize([Name("a")])
 
 
 def test_dataclass_that_compares_by_identity_is_unsupported():

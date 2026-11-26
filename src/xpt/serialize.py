@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
-from xpt import adapters, errors
+from xpt import adapters, errors, native
 from xpt.path import Attr, Index, Key, Path
 from xpt.unsupported import UnsupportedValue, type_name
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Seq, Set, Str, Value
@@ -62,6 +62,8 @@ def _container(obj: object, path: Path, active: set[int]) -> Value:
             return Dict(tuple(pairs))
     if adapter := adapters.find(exact):
         return adapter(obj, path, lambda o, p: _serialize(o, p, active))
+    if (found := native.record(obj, path, lambda o, p: _serialize(o, p, active))) is not None:
+        return found
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return _dataclass(obj, path, active)
     if isinstance(obj, BaseException):

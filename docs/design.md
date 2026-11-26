@@ -242,6 +242,8 @@ xpt accept --all            every group not rejected; those that cannot be accep
 xpt runs                    the recorded runs, newest first
 xpt flaky                   call sites whose values changed between stored runs with the same source
 xpt env [NAME]              the interpreter, shadowed modules, and lockfile drift; or where NAME imports from
+xpt coverage [--since REF] -- pytest ...   changed lines no test ran, by function (see Coverage in the diff)
+xpt coverage --from-coverage [PATH]        the same, from coverage.py's data file
 xpt clean                   delete .xpt/
 xpt reject <id>...          record each group's actual value as a bug, never to be offered
 ```
@@ -251,7 +253,7 @@ Every command takes `--json`, and `--root PATH` for a project other than the cur
 Exit codes:
 
 - `0`: the command did what it was asked, or there is nothing to do.
-- `1`: `failures` found failures, `flaky` found flaky call sites, `env` found a problem, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
+- `1`: `failures` found failures, `flaky` found flaky call sites, `env` found a problem, `coverage` found changed lines no test ran or the tests failed, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
 - `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record or decision, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
 
 Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. It moves to `rejected` when `xpt reject` records its actual value as a bug.
@@ -345,7 +347,7 @@ Next: xpt accept 7f3a
 - **The intersection.** A hunk ran when the test ran one of its new lines. A removal ran when the test ran the line on either side of it. A file whose sha256 differs from the trace's changed after the run, so its line numbers no longer hold. It is left out and named on a `changed since the run, left out:` line. Hunks are grouped by the innermost function or class around their first line, from the working tree's syntax tree, `<module>` at module level, and printed with the common indentation removed. The default limits are 10 lines of 80 characters, and `--full` lifts them.
 - **Nothing ran.** When the tests ran no changed line, show prints `no changed code ran; the expectation or the environment changed (diff against main)`. That is a strong hint that the expectation itself is stale, or that the failure comes from data, time, or the platform.
 - **No trace.** `xpt show` says `no trace of these tests; run them with pytest --xpt-trace to see the changed code they ran`. `xpt accept` prints nothing for a group without a trace, so an untraced accept reads as before. `--json` always carries `changed_code`, with `status` `no_trace`.
-- **Reuse.** Coverage in the diff (#63) needs the same three parts: `trace.Tracer` for the lines, `changes.changes` for the diff, and `changes.function_at` for grouping by function.
+- **Reuse.** `xpt coverage` (see Coverage in the diff) uses the same three parts: `trace.Tracer` for the lines, `changes.changes` for the diff, and `changes.function_at` for grouping by function.
 
 Open questions, resolved:
 
@@ -360,6 +362,27 @@ Open questions, resolved:
 
   The whole suite spends most of its time in `pytester` subprocesses, which are not traced, so its numbers are within noise. The in-process tests run xpt's own code, all of it project code here, and show the real cost: about 70 to 100 percent on 3.11, where every project line calls a Python trace function, and about 2 percent on 3.12 and later, where each line calls back once per test. The 3.11 cost is too much to pay on every run of every project for a question asked only when an expectation fails, and an agent can rerun only the failed tests with `pytest --lf --xpt-trace` when it needs the answer. On 3.12 and later the cost is small enough that turning it on by default there is the likely next step, once a larger project confirms the number.
 - **Accept or show?** Both. Accept prints the changed code before it writes, because accept is where a wrong decision lands, and it computes the hunks before writing so the accept's own edit does not show.
+
+### Coverage in the diff
+
+coverage.py's `term-missing` lists line ranges per file for the whole project, and the agent then opens each file to learn what the lines are. `xpt coverage` answers the question an agent has before it reports a change done: which of the lines I changed did no test run?
+
+```
+$ xpt coverage -- pytest
+src/app/load.py read_rows: 2 of 9 changed lines not run
+  31 |         if row.get("count") is None:
+  32 |             raise ValueError("missing count")
+2 of 9 changed lines not run, in 1 function (since main).
+```
+
+- **Scope.** A separate command, not part of the pytest report. The report answers "what failed", and adding coverage to it would cost every run a trace of every line and lengthen every footer. `xpt coverage [--since REF] [--json] [--full] -- <pytest command>` runs the given command from the root, its output on stderr, and reports on stdout. `--from-coverage [PATH]` reads coverage.py's data file, `.coverage` by default, instead of running anything, for a project that already runs coverage.py. The xpt process never imports the project.
+- **The changed lines.** `changes.changes` gives the hunks against `--since`, with the same default and the same untracked files as Changed code. A changed line counts only when it holds code: a line of some code object compiled from the file's current source, through `co_lines()`, so blank lines, comments, `else:`, and other lines with no bytecode never show as not run. Compiling runs nothing. A file that does not compile is left out. When no changed line holds code, the command says so and exits 0 without running the tests.
+- **The lines that ran.** `xpt coverage` sets `XPT_COVERAGE` to a temporary directory for the command. When the plugin sees it, `pytest_load_initial_conftests` starts a `trace.Tracer(session=True)` before conftest files import the project, so their module bodies count. The tracer keeps every project line it sees, in every context, beside the per-test contexts `--xpt-trace` uses, which stay as they were. On 3.12 and later each line costs one callback for the whole session, because no per-test `restart_events` turns it back on unless `--xpt-trace` is also given. On 3.11 it costs what `--xpt-trace` costs. Modules already imported when the tracer starts, such as `-p` plugins, are listed as `imported`, and their module and class body lines count as run. At session end each process, the controller and every xdist worker, writes `<pid>-<random>.json`, `{"schema_version": 1, "root": str, "lines": {path: [line]}, "imported": [path]}`, so workers never share a file. The reader rebases each path from that process's root onto the project root and drops paths outside it, so a pytest that a test starts in another directory adds nothing. A process that already runs a session tracer, such as an inline `pytester` run, does not start a second. No recording under `.xpt/` is needed.
+- **coverage.py's data.** `--from-coverage` opens the SQLite file read-only with `sqlite3` and reads `file`, then `line_bits` (numbits: bit `i` of byte `b` is line `8b + i`), or `arc` when it measured branches, where every positive endpoint is a line that ran. Contexts are merged. coverage.py need not be installed. A changed file the data does not list was not measured, so it is named on a `not in the coverage data, left out:` line instead of reported as not run. A changed file modified after the data file was written is named on a `changed since the coverage data, left out:` line, because its line numbers may have moved.
+- **Grouping and limits.** Changed lines are grouped by `changes.function_at`, the innermost function or class, `<module>` at module level. Text lists only the groups with lines that did not run, each with the source line as it is in the file, 10 lines of 80 characters per group, and a summary. `--full` lifts the limits. `--json` carries every group, including the ones that ran in full.
+- **Exit codes.** `0` when every changed line ran and pytest passed, `1` when a changed line did not run or pytest exited nonzero, which the report says on its own line, and `2` for a usage error: no git or no repository, an unknown ref, a command that traced no lines, because it was not pytest or the plugin was not loaded, or a file that is not coverage.py data.
+- **Branches.** Not reported yet. Never-taken branches need the possible arcs of each changed line, which coverage.py computes from its own analysis of the syntax tree. From xpt's tracer they could come from `sys.monitoring` `BRANCH` events on 3.12 and 3.13 and `BRANCH_LEFT` and `BRANCH_RIGHT` on 3.14, with the possible branches read from the bytecode of the changed code objects, and not at all on 3.11. That is a follow-up. A branch that was never taken often leaves a line of its body not run, which this already reports.
+- **Subprocesses.** Lines run by processes the tests start, other than pytest, are not traced.
 
 ## Persistence
 

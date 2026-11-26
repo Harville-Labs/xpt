@@ -302,6 +302,41 @@ A skip's `line` is `null` when the whole file was skipped.
 - `value` is a variable's annotation and value as text, a property's type, or a module entry's dotted name. `members` lists a class's methods, properties, and enum members.
 - `more` counts the names `--limit` left out. `notes` holds the text lines that follow the names.
 
+## Coverage
+
+`xpt coverage --json` returns every function with changed lines that hold code, including the ones that ran in full. See [`xpt coverage`](cli.md#xpt-coverage).
+
+```json
+{
+  "schema_version": 1,
+  "command": "coverage",
+  "since": "main",
+  "source": "xpt",
+  "tests": 0,
+  "changed": 9,
+  "not_run": 2,
+  "functions": [
+    {
+      "path": "src/app/load.py",
+      "function": "read_rows",
+      "changed": [28, 29, 30, 31, 32, 33, 34, 35, 36],
+      "not_run": [
+        {"line": 31, "text": "        if row.get(\"count\") is None:"},
+        {"line": 32, "text": "            raise ValueError(\"missing count\")"}
+      ]
+    }
+  ],
+  "stale": [],
+  "unmeasured": []
+}
+```
+
+- `source` is `xpt` when xpt ran the command and traced it, `coverage.py` with `--from-coverage`.
+- `tests` is pytest's exit code, null when nothing ran, with `--from-coverage` or when no changed line holds code.
+- `changed` and `not_run` count lines over every function. A function's `changed` lists its changed lines that hold code. `not_run` gives each one that did not run with its source line, uncut.
+- `function` is the qualified name of the innermost function or class, null at module level.
+- `stale` lists changed files edited after coverage.py's data file was written, and `unmeasured` changed files that data does not cover. Both are left out of `functions` and are empty without `--from-coverage`.
+
 ## Runs
 
 ```json

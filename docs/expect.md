@@ -9,6 +9,7 @@ expect(actual, expected, atol=1e-6)  # floats pass when within the tolerance
 expect(actual, expected, ignore=['value["id"]'])  # leave volatile dict entries out
 expect(actual, expected, unordered=True)  # lists compare as multisets
 expect(actual, {1: 2, 2: 4}, key=n)  # one expected value per parametrized case
+expect.output(capsys)  # captured stdout and stderr as lists of lines
 ```
 
 `expect` compares `actual` with `expected`. When they differ, or when `expected` is left out, the test fails with `ExpectationFailed` and xpt records the actual value under `.xpt/` so `xpt accept` can write it into the source.
@@ -143,6 +144,33 @@ xpt writes a dataclass by its class name, for example `Order(id=7, items=["apple
 3. Any other module-level binding of the name `Order`, such as a class statement or an assignment.
 
 Arrays and tensors work the same way, so a file with `import numpy as np` gets `np.array(...)` and a file with `import torch` gets `torch.tensor(..., dtype=torch.float32)`. When the file has none of these, the accept is skipped and the reason names the import to add.
+
+## Output
+
+`expect.output` expects what a test printed, or what a subprocess wrote and returned:
+
+```python
+def test_build(capsys):
+    main(["build", "--dry-run"])
+    expect.output(capsys, {"stdout": ["would build 2 files"], "stderr": []})
+
+
+def test_cli():
+    result = subprocess.run(["mytool", "--version"], capture_output=True, text=True)
+    expect.output(result, {"stdout": ["mytool 1.2"], "stderr": [], "returncode": 0})
+```
+
+The first argument is the `capsys` or `capfd` fixture, or a `subprocess.CompletedProcess`. Each stream is a list of lines, so a failure names the line that changed, as in `value["stdout"][3]: "built 2 files" -> "built 3 files"`. A final newline ends the last line rather than adding an empty one. A process also records its `returncode`, and a stream it did not capture, such as `stderr=subprocess.STDOUT`, is left out. Bytes are decoded as UTF-8, and a byte that is not valid UTF-8 is written as an escape such as `\xff`. Start with `expect.output(capsys)` and accept it like any other expectation; the dict goes in as the second argument.
+
+Before comparing, xpt normalizes each line:
+
+1. The project root, pytest's `rootdir` or the current directory without pytest, becomes `<root>`.
+2. The temporary directory becomes `<tmp>`. A directory made by `tempfile.mkdtemp()` or pytest's `tmp_path` becomes `<tmp>` as a whole, so the random or numbered part does not change between runs.
+3. Trailing whitespace is dropped, including the `\r` of a Windows line ending.
+
+Both sides of the comparison see the normalized text, and xpt records it. When a rule changed the output of a failing call, the failure says so in a line such as `output normalized: the project root -> <root>, trailing whitespace dropped.` Pass `normalize=False` to compare the lines exactly as printed. The rules are fixed. For anything else that changes between runs, such as a timestamp, leave a whole stream out with `ignore=['value["stderr"]']`, or clean the text yourself and expect its lines with `expect(text.splitlines())`. `key=` works as it does for `expect`.
+
+Reading `capsys` or `capfd` consumes what they captured, as `readouterr()` does, so that output is not in pytest's captured-output section when the test fails. The failure diff and the recorded actual value hold all of it.
 
 ## Helpers
 

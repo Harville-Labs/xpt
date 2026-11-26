@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env,api} [options]
+xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env,api,probe} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -261,13 +261,24 @@ Serve `failures`, `show`, `accept`, `reject`, `runs`, and `flaky` as MCP tools o
 |---|---|
 | `--root ROOT` | The project root the tools read and write. Default `.`. |
 
+### `xpt probe FILE:LINE [options] -- COMMAND [ARG ...]`
+
+Run a command and record the values at one line of a Python file in every Python process it starts, without editing the source. See [Probing a line](probe.md). After the command finishes, it prints on stderr how often the line was hit, the locals of the first hit, and for each later hit the paths that changed. The exit code is the command's, 127 when it can't be started, and 2 when the file is missing or the line can never run. `--root` does not apply.
+
+| Option | Meaning |
+|---|---|
+| `--expr EXPR` | Record this expression, evaluated in the frame, instead of the locals. |
+| `--when COND` | Record only the hits where this condition is true. `FILE:LINE if COND` is the same. |
+| `--max-hits N` | Record the first `N` hits in each process. Default 100. Later hits are still counted. |
+| `--json` | Print one JSON object on stdout, and send the command's stdout to stderr. |
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
 | `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, an `init` check found a problem, or `env` found a problem or no module `NAME`. |
-| `2` | A usage error, such as `xpt run` without a command, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, an `api` target that is not installed or not found, unpaired markers in `AGENTS.md`, or a malformed `.mcp.json` with `init --mcp`. The error is one line on stderr that says what to do next, and nothing is written. |
+| `2` | A usage error, such as `xpt run` without a command, an `xpt probe` line that can never run, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, an `api` target that is not installed or not found, unpaired markers in `AGENTS.md`, or a malformed `.mcp.json` with `init --mcp`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files
 
@@ -278,6 +289,7 @@ Serve `failures`, `show`, `accept`, `reject`, `runs`, and `flaky` as MCP tools o
   runs/<run>/source     the project source digest, for xpt flaky
   runs/<run>/<worker>.trace.json  with pytest --xpt-trace, the lines each failing test ran
   latest                the id of the newest complete run
+  probes/<id>.jsonl     the hits of one xpt probe, the last five kept
   decisions.jsonl       rejections, one per line
   accept.lock           held while accept or reject writes
 ```

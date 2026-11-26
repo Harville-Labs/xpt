@@ -5,6 +5,9 @@ It imports nothing from xpt until an exception reaches a hook, so a process that
 crash pays only for this file. It first imports the `sitecustomize` it shadows, if any, as
 Python would have, and installs its hooks over any that one set. Without an importable
 xpt the hooks print Python's own traceback.
+
+`xpt probe` uses the same file: with `XPT_PROBE` set, it loads `_xpt_probe.py` from this
+directory, by path so the directory can leave `sys.path`, and installs its line tracer.
 """
 
 import os
@@ -67,6 +70,20 @@ def _install() -> None:
         sys.modules["threading"].excepthook = threadhook  # ty: ignore[missing-attribute]
 
 
+def _probe(config: str) -> None:
+    from importlib.util import module_from_spec, spec_from_file_location
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_xpt_probe.py")
+    spec = spec_from_file_location("_xpt_probe", path)
+    if spec is None or spec.loader is None:
+        return
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.install(config)
+
+
 _chain()
 if os.environ.get("XPT_TRACEBACK"):
     _install()
+if _config := os.environ.get("XPT_PROBE"):
+    _probe(_config)

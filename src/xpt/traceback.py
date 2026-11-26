@@ -273,12 +273,7 @@ def collapse(labels: Sequence[str], longest: int = _LONGEST_CYCLE) -> list[str]:
 def locals_lines(frame: FrameType, lim: Limits) -> list[str]:
     """The frame's locals as compact value trees, leaving out dunders, modules, functions,
     and classes. A value xpt cannot serialize prints as `<module.Type>`."""
-    names = [
-        (name, value)
-        for name, value in frame.f_locals.items()
-        if not (name.startswith("__") and name.endswith("__"))
-        and not isinstance(value, _HIDDEN_TYPES)
-    ]
+    names = visible_locals(frame)
     if not names:
         return []
     limit = len(names) if lim.changes is None else lim.changes
@@ -288,13 +283,28 @@ def locals_lines(frame: FrameType, lim: Limits) -> list[str]:
     return lines
 
 
+def visible_locals(frame: FrameType) -> list[tuple[str, object]]:
+    """The frame's locals without dunders, modules, functions, and classes."""
+    return [
+        (name, value)
+        for name, value in frame.f_locals.items()
+        if not (name.startswith("__") and name.endswith("__"))
+        and not isinstance(value, _HIDDEN_TYPES)
+    ]
+
+
 def value_text(value: object, lim: Limits) -> str:
     try:
         return show(serialize(value), lim.width)
     except Exception:
-        kind = type(value)
-        module = "" if kind.__module__ == "builtins" else f"{kind.__module__}."
-        return f"<{module}{kind.__qualname__}>"
+        return placeholder(value)
+
+
+def placeholder(value: object) -> str:
+    """How a value xpt cannot serialize prints: its type as `<module.Type>`."""
+    kind = type(value)
+    module = "" if kind.__module__ == "builtins" else f"{kind.__module__}."
+    return f"<{module}{kind.__qualname__}>"
 
 
 def library_path(path: Path) -> str:

@@ -370,6 +370,7 @@ Open questions, resolved:
   runs/<run>/source     # the project source digest, written by the pytest controller
   runs/<run>/<worker>.trace.json  # with --xpt-trace, the lines each failing test ran
   latest                # the run id of the newest complete run
+  probes/<id>.jsonl     # the hits of one xpt probe (see Probing a line)
   decisions.jsonl       # reject decisions, one per line (see Rejection)
 ```
 
@@ -645,6 +646,31 @@ RuntimeError: load failed
 
 On the crash fixtures in `tests/crash_project.py`, the compact traceback is about a fifth of Python's on stderr, and the tests require at most a third.
 
+### Probing a line
+
+Agents can't drive pdb, so they debug by adding `print` calls, rerunning, and deleting the prints, which edits source and costs a run per round. `xpt probe FILE:LINE [--expr EXPR] [--when COND] [--max-hits N] [--json] -- command` records the values at one line while the command runs (#59):
+
+```
+app/window.py:6 hit 2 times
+  hit 1 in window_sums from tests/test_window.py:5 in test_window_sums:
+    values = [1, 2, 3, 4]
+    size = 2
+    sums = []
+    start = 0
+    chunk = [1, 2]
+  hit 2: sums[0]: added 3; start: 0 -> 1; chunk[0]: 1 -> 2; chunk[1]: 2 -> 3
+Recorded in .xpt/probes/20261126T074616-6753.jsonl. Exit code 1.
+```
+
+- **Scope: inside xpt.** A separate package would need the value trees, `serialize`, `diff`, `show`, the frame filtering, and the `sitecustomize` activation, which is most of what it does. It ships as the `xpt probe` subcommand, and the code lives in `xpt.probe` and `xpt/startup/_xpt_probe.py`; `cli.py` only routes to it.
+- **Activation.** The same as `xpt run`: `startup/` goes first on `PYTHONPATH` and `XPT_PROBE` holds the configuration as JSON, so every Python process the command starts, including xdist workers and subprocesses, loads the tracer. The `sitecustomize` loads `_xpt_probe.py` by path, after chaining any `sitecustomize` it shadows. When the process can't import xpt, the tracer appends the directory xpt was imported from in the parent to the end of `sys.path` on the first hit, so it never shadows the process's own packages.
+- **Tracing cost.** The tracer uses only the standard library until the line runs. On 3.12 and later it uses `sys.monitoring`: a `PY_START` callback sees each code object once, turns on local `LINE` events for the code objects of the target file whose `co_lines()` hold the line, and returns `DISABLE` everywhere; the `LINE` callback returns `DISABLE` for every other line. So code objects are found lazily as they start, with no import hook, and a program runs at nearly full speed until the line is hit. On 3.11 a `sys.settrace` and `threading.settrace` function returns a line tracer only for those code objects, and caches the file check by filename. It still costs a Python call per function call: a loop of two million small calls went from about 0.07 s to 0.3 to 0.5 s. `XPT_PROBE_TRACER=settrace` forces the 3.11 path on later versions, which the tests use to cover both on every CI Python.
+- **A hit.** The values are read before the line runs, as at a breakpoint. `--when` and `--expr` are compiled before the command starts, so a syntax error is a usage error, and are evaluated in the frame's globals and locals. They are text the user typed, run in the user's own program. A `--when` that raises counts as false and is reported with how often it raised. A hit records the locals that the compact traceback would print (no dunders, modules, functions, or classes), or the one `--expr` value, as value trees. A value `serialize` refuses records the same `<module.Type>` placeholder the traceback prints, and a value over 100,000 JSON characters records its type and size. The hit also records the project call chain from `xpt.frames`, through the traceback's `Hooks.place`. A re-entrancy guard per thread stops a hit from probing itself when `--expr` calls back into the line.
+- **Aggregation.** Each process appends to its own file in `.xpt/probes/<id>.d/` and flushes each line, so nothing is shared or locked. At exit it writes a line with its counts: how often the line ran, how often `--when` was true, and its first `--when` error. A forked child resets its counts. When the command ends, `xpt probe` merges the files into `.xpt/probes/<id>.jsonl`: a header, the hits in time order, and the process lines. A process that exited without its count line (`os._exit`) counts its recorded hits. `--max-hits` applies per process, because a global count would need IPC; hits past it are still counted. The last five probes are kept.
+- **Output.** `path:line hit N times`, the first hit's function, `from` chain, and locals, then one line per later hit with the paths that changed since the hit before, from the structured diff, as `path: old -> new` with the local's name as the path's root. Diffing against the previous hit rather than the first shows a loop's progress one step at a time. A line that can never run, found by compiling the file and collecting `co_lines()` from every nested code object, is refused before the command runs with the nearest executable lines. A line that never ran, a `--when` that was never true, and a command whose processes never loaded the probe (`python -I`) each get their own message. The summary goes to stderr after the command, so its stdout is unchanged. `--json` prints one object on stdout and sends the command's stdout to stderr. The exit code is the command's.
+- **Recorded values are data.** Reading a probe file rebuilds values with `from_json` and nothing else. `tests/test_probe.py` checks that a recorded string holding code stays a string.
+- **No benchmark.** The issue asked for a token comparison with print debugging through the benchmark harness. That needs paid agent runs, so instead `tests/probe_project.py` seeds an off-by-one in a sliding-window sum, and a test pins the probe output that shows it: the line ran twice for three windows, and `start` stopped at 1.
+
 ## Environment report
 
 Agents lose turns to environment problems that look like code problems: the wrong interpreter, a local `json.py` shadowing the standard library, or an installed version that differs from the lockfile. Each shows up as a confusing import error or a wrong-API failure, and the agent debugs the code. `xpt env` reports them in one call.
@@ -741,4 +767,5 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **MCP server.** `xpt mcp` and `xpt init --mcp` are done. Comparing it with the CLI in the agent benchmark is part of M5.
 - **Environment report.** `xpt env` and `xpt env NAME` are done. A shadowing line in the pytest report when a test module fails to import is next.
 - **Installed API listing.** `xpt api` is done.
+- **Probing a line.** `xpt probe` is done.
 - **M6. Release.** Name check, docs, PyPI.

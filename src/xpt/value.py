@@ -149,7 +149,10 @@ def _tagged(tag: object, payload: object) -> Value:
         case "ref", str() if ":" in payload:
             return Ref(payload)
         case str(), dict() if ":" in tag:
-            return Dataclass(tag, tuple((k, from_json(v)) for k, v in _fields(payload)))
+            fields = tuple((k, from_json(v)) for k, v in _fields(payload))
+            if any(k == "*" and not (isinstance(v, Seq) and v.kind == "tuple") for k, v in fields):
+                raise InvalidValue(f'field "*" of {tag} holds positional arguments as a tuple')
+            return Dataclass(tag, fields)
     raise InvalidValue(
         f"unknown tagged value {{{tag!r}: {payload!r}}}. Tags are tuple, set, frozenset, "
         'float, dict, ref, or a dataclass type like "module:Qualname".'

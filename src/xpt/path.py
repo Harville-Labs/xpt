@@ -25,9 +25,22 @@ Step = Attr | Index | Key
 Path = tuple[Step, ...]
 
 
+POSITIONAL = "*"
+"""The field of a constructor call that holds its positional arguments, as a tuple.
+
+An exception's arguments are recorded this way, and written as `ValueError("bad")`. The
+field's path step is `.args`, the attribute that holds them.
+"""
+
+
+def field_name(name: str) -> str:
+    """The attribute a field's path step names: `args` for the positional arguments."""
+    return "args" if name == POSITIONAL else name
+
+
 def field_path(path: Path, name: str) -> Path:
     """The path to a field; the positional field "" of a constructor call adds no step."""
-    return (*path, Attr(name)) if name else path
+    return (*path, Attr(field_name(name))) if name else path
 
 
 def format_path(path: Path, root: str = "value") -> str:

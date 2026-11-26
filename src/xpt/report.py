@@ -8,15 +8,17 @@ from xpt.value import Value
 
 MAX_CHANGES = 10
 MAX_CHARS = 80
+RAISES = "expect.raises()"
 
 
-def missing(actual: Value, key: Value | None = None) -> str:
+def missing(actual: Value, key: Value | None = None, call: str = "expect()") -> str:
     case = "" if key is None else f" for key={show(key)}"
-    return f"expect() has no expected value{case}. Actual: {show(actual)}"
+    seen = "Raised" if call == RAISES else "Actual"
+    return f"{call} has no expected value{case}. {seen}: {show(actual)}"
 
 
-def mismatch(result: Diff, how: Options = PLAIN) -> str:
-    header = f"expect() mismatch ({label}):" if (label := how.label()) else "expect() mismatch:"
+def mismatch(result: Diff, how: Options = PLAIN, call: str = "expect()") -> str:
+    header = f"{call} mismatch ({label}):" if (label := how.label()) else f"{call} mismatch:"
     return "\n".join([header, *changes(result)])
 
 

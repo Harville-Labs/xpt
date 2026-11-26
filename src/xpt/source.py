@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from xpt.literal import float_literal, quote
-from xpt.path import Index, Key, Path, field_path
+from xpt.path import POSITIONAL, Index, Key, Path, field_path
 from xpt.unsupported import UnsupportedValue
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Ref, Seq, Set, Str, Value
 
@@ -121,7 +121,7 @@ class _Printer:
                 )
                 return _Group("{", labelled, "}")
             case Dataclass(type_id, fields):
-                labelled = tuple(_Child(f and f"{f}=", v, field_path(path, f)) for f, v in fields)
+                labelled = tuple(c for f, v in fields for c in _fields(f, v, path))
                 return _Group(f"{self.named(type_id, path)}(", labelled, ")")
         return None
 
@@ -130,6 +130,13 @@ class _Printer:
         if name is None:
             raise UnsupportedValue(path, f"is a {type_id} that is not importable by name")
         return name
+
+
+def _fields(name: str, value: Value, path: Path) -> tuple[_Child, ...]:
+    """A constructor call's argument, or its positional arguments one by one."""
+    if name == POSITIONAL and isinstance(value, Seq):
+        return _indexed(value.items, field_path(path, name))
+    return (_Child(name and f"{name}=", value, field_path(path, name)),)
 
 
 def _indexed(items: tuple[Value, ...], path: Path) -> tuple[_Child, ...]:

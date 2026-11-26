@@ -17,14 +17,14 @@ from xpt.options import PLAIN, Options, options
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Value, canonical, from_json, to_json
 
-Status = Literal["missing", "mismatch", "unsupported"]
+Status = Literal["missing", "mismatch", "unsupported", "returned"]
 
 SCHEMA_VERSION = 1
 MAX_RECORD_BYTES = 1_000_000
 KEEP_RUNS = 5
 DIRECTORY = ".xpt"
 
-_STATUSES: tuple[Status, ...] = ("missing", "mismatch", "unsupported")
+_STATUSES: tuple[Status, ...] = ("missing", "mismatch", "unsupported", "returned")
 _RUN_ID = re.compile(r"\d{8}T\d{6}-[0-9a-f]{4}")
 
 T = TypeVar("T")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import TYPE_CHECKING
 
-from xpt import adapters
+from xpt import adapters, errors
 from xpt.path import Attr, Index, Key, Path
 from xpt.unsupported import UnsupportedValue, type_name
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Seq, Set, Str, Value
@@ -64,6 +64,8 @@ def _container(obj: object, path: Path, active: set[int]) -> Value:
         return adapter(obj, path, lambda o, p: _serialize(o, p, active))
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return _dataclass(obj, path, active)
+    if isinstance(obj, BaseException):
+        return errors.record(obj, path, lambda o, p: _serialize(o, p, active))
     raise UnsupportedValue(path, f"is a {type_name(exact)}")
 
 

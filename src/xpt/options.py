@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from xpt.diff import Diff, diff, norm
-from xpt.path import Attr, Index, Key, field_path, format_path
+from xpt.path import Attr, Index, Key, field_name, field_path, format_path
 from xpt.path import Path as ValuePath
 from xpt.serialize import serialize
 from xpt.tolerance import EXACT, Tolerance, tolerance
@@ -165,7 +165,7 @@ def _strip(value: Value, pattern: Pattern, at: ValuePath) -> Value:
             name = step.name if isinstance(step, Attr) else ""
             inner = rest if name else pattern
             at_field = field_path(at, name)
-            if name and not rest and any(n == name for n, _ in fields):
+            if name and not rest and any(field_name(n) == name for n, _ in fields):
                 shown = format_path(at_field)
                 raise ValueError(
                     f"ignore path {shown} names a field of {type_id.partition(':')[2]}, which "
@@ -174,7 +174,10 @@ def _strip(value: Value, pattern: Pattern, at: ValuePath) -> Value:
                 )
             return Dataclass(
                 type_id,
-                tuple((n, _strip(v, inner, at_field) if n == name else v) for n, v in fields),
+                tuple(
+                    (n, _strip(v, inner, at_field) if field_name(n) == name else v)
+                    for n, v in fields
+                ),
             )
     return value
 

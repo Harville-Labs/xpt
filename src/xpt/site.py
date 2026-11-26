@@ -48,6 +48,32 @@ def call_site(depth: int, root: Path) -> CallSite | Unlocatable:
 
 def locate(frame: FrameType, root: Path) -> CallSite | Unlocatable:
     """Identify the call that `frame` is running, by function, ordinal, and argument text."""
+    found = _running(frame, root)
+    if isinstance(found, Unlocatable):
+        return found
+    path, qualname, source, calls, call, line = found
+    return CallSite(path, qualname, callee(call), ordinal(calls, call), arg_sha(source, call), line)
+
+
+def called_text(frame: FrameType, root: Path) -> str | None:
+    """What the first argument of the running call calls, as source text: `parse("x")` for
+    `lambda: parse("x")`, `run()` for `run`. None when xpt cannot find the call."""
+    found = _running(frame, root)
+    if isinstance(found, Unlocatable) or not found[4].args:
+        return None
+    source, first = found[2], found[4].args[0]
+    if isinstance(first, ast.Starred):
+        return None
+    if isinstance(first, ast.Lambda):
+        return ast.get_source_segment(source, first.body)
+    text = ast.get_source_segment(source, first)
+    return None if text is None else f"{text}()"
+
+
+_Running = tuple[str, str, str, list[ast.Call], ast.Call, int]
+
+
+def _running(frame: FrameType, root: Path) -> _Running | Unlocatable:
     code = frame.f_code
     filename = code.co_filename
     path = _relative_path(filename, root)
@@ -88,8 +114,7 @@ def locate(frame: FrameType, root: Path) -> CallSite | Unlocatable:
             f"{path}:{line} has no call in {qualname} where the running code expects one. "
             "The file probably changed after it was imported. Run the tests again."
         )
-    call = found[0]
-    return CallSite(path, qualname, callee(call), ordinal(calls, call), arg_sha(source, call), line)
+    return path, qualname, source, calls, found[0], line
 
 
 def callee(call: ast.Call) -> str:

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from xpt.group import group
-from xpt.record import load_run
+from xpt.record import base_nodeid, load_run
 
 pytest.importorskip("xdist")
 
@@ -130,7 +130,8 @@ def test_every_workers_observations_land_in_one_run_and_group_as_without_xdist(
 def test_conflicting_values_from_different_workers_are_one_conflict_that_accept_refuses(
     project: pytest.Pytester,
 ):
-    first = run(project, *SPLIT)
+    # Two groups and two workers: loadgroup hands each worker one group to start with.
+    first = run(project, *SPLIT, "-k", "test_conflict")
     conflict = ids(first)["test_conflict"]
     workers = observed_by_worker(project)
     [one] = [w for w, tests in workers.items() if "test_sample.py::test_conflict[1]" in tests]
@@ -199,3 +200,16 @@ def test_no_record_under_xdist_still_refuses_to_write(project: pytest.Pytester, 
     assert result.ret == pytest.ExitCode.USAGE_ERROR
     assert f"{flag.split('=')[0]} needs recording. Drop --expect-no-record." in result.stderr.str()
     assert not (project.path / ".xpt").exists()
+
+
+@pytest.mark.parametrize(
+    ("nodeid", "plain"),
+    [
+        ("test_a.py::test_x[1]@one", "test_a.py::test_x[1]"),
+        ("test_a.py::test_x@one", "test_a.py::test_x"),
+        ("test_a.py::test_x[a@b]", "test_a.py::test_x[a@b]"),
+        ("test_a.py::TestC::test_x", "test_a.py::TestC::test_x"),
+    ],
+)
+def test_test_ids_drop_the_xdist_group_suffix(nodeid: str, plain: str):
+    assert base_nodeid(nodeid) == plain

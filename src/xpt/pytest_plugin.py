@@ -170,7 +170,8 @@ def pytest_configure_node(node: Any) -> None:
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object]:
-    record.recorder.test = item.nodeid
+    test = record.base_nodeid(item.nodeid)
+    record.recorder.test = test
     tracer = item.config.stash.get(_TRACER, None)
     if tracer is not None:
         tracer.begin()
@@ -179,10 +180,10 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
     finally:
         record.recorder.test = None
         if tracer is not None:
-            recorded = item.nodeid in record.recorder.tests
+            recorded = test in record.recorder.tests
             lines = tracer.end(keep=recorded)
             if recorded:
-                item.config.stash[_TRACED][item.nodeid] = lines
+                item.config.stash[_TRACED][test] = lines
 
 
 @pytest.fixture

@@ -10,6 +10,7 @@ from xpt.diff import Diff, diff
 from xpt.failure import Compared, Expected, Failure, Raised, Text, Where, where_json
 from xpt.flaky import Volatile
 from xpt.flaky import mark as mark_flaky
+from xpt.frames import keep
 from xpt.group import Group, group
 from xpt.render import accept_json, change_json, flaky_lines, group_json, outcome_lines
 from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
@@ -18,7 +19,6 @@ from xpt.site import CallSite, SiteKey, Unlocatable
 from xpt.value import Json
 
 SCHEMA_VERSION = 1
-MAX_FRAMES = 4
 _WRITTEN = ("accepted", "already_accepted")
 
 Lines = list[str]
@@ -249,9 +249,7 @@ def _at(w: Where) -> str:
         return f"{at} in {w.function}" if w.function else at
     frames = [_frame(f"{c.path}:{c.line}", c.function) for c in w.callers]
     frames.append(_frame(at, w.function))
-    if len(frames) > MAX_FRAMES:
-        frames = [frames[0], "...", *frames[1 - MAX_FRAMES :]]
-    return " > ".join(frames)
+    return " > ".join(keep(frames))
 
 
 def _frame(at: str, function: str | None) -> str:
@@ -281,7 +279,7 @@ def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
             found = diff(detail.left, detail.right)
             return _changes(found, lim, labeled=True)
         case Raised():
-            return _raised(detail, lim)
+            return raised_lines(detail, lim)
         case Text():
             return _text(detail.text, lim)
 
@@ -290,7 +288,7 @@ def _changes(found: Diff, lim: Limits, labeled: bool = False) -> Lines:
     return changes(found, limit=lim.changes, width=lim.width, labeled=labeled)
 
 
-def _raised(r: Raised, lim: Limits) -> Lines:
+def raised_lines(r: Raised, lim: Limits) -> Lines:
     if r.type != "AssertionError":
         message = " ".join(r.message.split())
         return [f"  {cut(f'{r.type}: {message}' if message else r.type, lim.message)}"]

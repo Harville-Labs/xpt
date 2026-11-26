@@ -1,6 +1,7 @@
 import json
 import re
 
+import crash_project
 import pytest
 
 from xpt.cli import main
@@ -394,3 +395,30 @@ def test_a_malformed_decisions_file_is_named_and_the_report_still_prints(
     result = lines(run(pytester, test_rejectable=REJECTABLE))
     assert result[0].startswith("xpt: .xpt/decisions.jsonl:1: not JSON")
     assert result[-1].startswith("2 failed in 0.00s. Next: xpt accept ")
+
+
+CRASH_REPORT = [
+    "FAILED test_crash.py::test_library  "
+    "test_crash.py:7 > app/load.py:12 load > app/load.py:6 read_row",
+    "  > return fakelib.parse(count)",
+    "  ValueError: invalid literal for int() with base 10: 'x'",
+    "FAILED test_crash.py::test_chained  test_crash.py:11 > app/chain.py:12 load",
+    '  > raise RuntimeError("load failed")',
+    "  RuntimeError: load failed",
+    "  caused by: ValueError: no count",
+    "FAILED test_crash.py::test_recursion  "
+    "test_crash.py:15 > ... > app/deep.py:2 depth > app/deep.py:2 depth > app/deep.py:2 depth",
+    "  > return depth(n + 1)",
+    "  RecursionError: maximum recursion depth exceeded",
+    "3 failed in 0.00s.",
+]
+
+
+def test_the_crash_project_report_keeps_its_shape(pytester: pytest.Pytester):
+    """The fixtures the compact traceback is tested on print this report under pytest, so
+    sharing frame filtering with the traceback leaves the report as it was."""
+    crash_project.write(pytester.path)
+    pytester.makepyfile(test_crash=crash_project.TESTS)
+    pytester.makeini("[pytest]\npythonpath = . lib/site-packages\n")
+    result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
+    assert lines(result) == CRASH_REPORT

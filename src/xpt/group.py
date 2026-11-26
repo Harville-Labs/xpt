@@ -28,7 +28,8 @@ class Group:
 
     `id` is the short display id, None for an unlocatable site. `actuals` holds the distinct
     actual values, one when the calls agree. `expected` is None when it was missing or when
-    the calls disagree on it. `detail` says why a group is not acceptable. `rejected` means
+    the calls disagree on it. `detail` says why a group is not acceptable, or for an
+    acceptable one holds the calls' note, such as how expect.output normalized. `rejected` means
     its one actual value was rejected as a bug with `xpt reject`.
     """
 
@@ -122,7 +123,7 @@ def _located(id: str, seen: list[tuple[CallSite, Observation]]) -> Group:
         return made("conflict", _disagree("the expected value", "had", shown) + ONE_EXPECT_PER_CASE)
     if is_keyed:
         return _keyed(made, observations)
-    return made(observations[0].status)
+    return made(observations[0].status, _notes(observations))
 
 
 def _keyed(made: Callable[..., Group], observations: list[Observation]) -> Group:
@@ -147,7 +148,11 @@ def _keyed(made: Callable[..., Group], observations: list[Observation]) -> Group
         if (value := found[0][0]) is not None:
             merged = with_entry(merged, key, value)
     status = "missing" if all(o.status == "missing" for o in observations) else "mismatch"
-    return made(status, values=() if merged is None else (merged,))
+    return made(status, _notes(observations), values=() if merged is None else (merged,))
+
+
+def _notes(observations: list[Observation]) -> str:
+    return " ".join(sorted({o.detail for o in observations if o.detail}))
 
 
 def _unlocatable(site: Unlocatable, observations: list[Observation]) -> Group:

@@ -336,6 +336,16 @@ Acceptance never runs code from the record. It builds source text from the `Valu
 - **The pass check stays `==` first.** A call returns as soon as `equal` passes, so options cost nothing on the passing path. Only a failing call serializes, applies the options, and compares again.
 - **Key keeps identity unchanged.** A keyed call site is still one site with one expected argument, so `arg_sha`, stale detection, and rewrite work as before. Each case is an entry in that argument's dict, and grouping merges the cases into one value (see Conflicting observations). Splitting one site into several identities per key would have needed a key in `SiteKey`, a key-aware rewrite, and per-key fingerprints, for no gain to the reviewer, who still edits one dict.
 
+## Expecting output
+
+`expect.output(source, expected)` builds a dict, `{"stdout": [...], "stderr": [...]}`, plus `"returncode"` for a `subprocess.CompletedProcess`, and passes it to `expect` with `_depth=1`. The call site's callee is `expect.output`, and the expected argument is still the second positional one, so identity, `arg_sha`, stale detection, `--expect-create`, and accept need nothing new. It lives in `xpt/output.py` and is attached to `Expect` as an attribute, like `digest`. A fixture is recognized by its `readouterr()` method, so the core never imports pytest.
+
+- **Lines, not one string.** A stream is split on `\n`, and a final newline does not add an empty line. A one-line change then diffs at `value["stdout"][3]` instead of as one long string, and accepted source has one line per element.
+- **Fixed normalizers.** In order: every spelling of the project root (as given and resolved, native and with forward slashes) becomes `<root>`; the system temporary directory becomes `<tmp>`, taking with it a `tmp********` directory from `mkdtemp` or pytest's `pytest-of-<user>/pytest-<n>/<test>` directory; trailing whitespace is dropped. A path only matches at a name boundary, so `/proj` does not rewrite `/project2`. We chose fixed rules over user-extensible ones: an extension point would need a way to record, show, and replay a user's rule at review time, and xpt never runs code from a record. Timestamps and durations are left to `ignore=` for whole streams or to the test, which can clean the text and call `expect` on the lines.
+- **Normalization is said.** When any rule changed the output of a failing call, the observation's `detail` holds one line naming the rules that fired. The exception message, the pytest report, and `xpt failures` and `xpt show` print it under the diff. A passing call says nothing.
+- **Reading consumes.** `readouterr()` empties the fixture's buffer, as it does when a test calls it. Re-emitting the text would duplicate it in a later `expect.output` and in pytest's own section. The failure's diff and record hold the whole output, so nothing is lost.
+- **Bytes decode as UTF-8 with `backslashreplace`.** The record holds strings only, and an invalid byte stays visible as `\xff` rather than failing the call.
+
 ## Reporting
 
 When xpt is installed, it replaces pytest's terminal output. Agents read every byte of a test run, and pytest's header, progress dots, rules, and full tracebacks spend tokens without saying more. The report stays readable for people, so it is the default. `--xpt-report=pytest`, or `XPT_REPORT=pytest`, keeps pytest's own output.
@@ -435,6 +445,8 @@ expect(actual, expected)  # compares with ==, records on mismatch
 ```
 
 Keyword-only arguments change how a call compares: `atol=`, `rtol=`, `ignore=`, `unordered=`, and `key=`. They stay in the source, so a reviewer can see them, and they are recorded with each observation, so review and accept compare the same way the test did.
+
+`expect.output(capsys)` expects captured stdout and stderr, or a `CompletedProcess`, as lists of lines (see Expecting output).
 
 pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, and `--xpt-json PATH`. unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 

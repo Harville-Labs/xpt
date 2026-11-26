@@ -42,10 +42,14 @@ def group_lines(g: Group, *, verbose: bool = False, full: bool = False) -> Lines
         if full and g.expected is not None:
             lines.append(f"  expected: {show(g.expected, width)}")
             lines.append(f"  actual: {show(g.actuals[0], width)}")
-        return lines + changes(found, limit=limit, width=width)
+        return lines + changes(found, limit=limit, width=width) + _note(g)
     if g.status == "missing":
-        return [*lines, f"  actual: {show(g.actuals[0], width)}"]
+        return [*lines, f"  actual: {show(g.actuals[0], width)}", *_note(g)]
     return [*lines, f"  {g.detail}"]
+
+
+def _note(g: Group) -> Lines:
+    return [f"  {g.detail}"] if g.detail else []
 
 
 def failures_lines(run: str, groups: Sequence[Group], run_option: str) -> Lines:

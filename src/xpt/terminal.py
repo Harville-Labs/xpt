@@ -234,8 +234,17 @@ def _failure(rep: Any) -> Failure:
         where = where_from_json(payload)
     else:
         path, line = location(rep)
-        where = Where(path, None if line is None else line + 1, None, Text(rep.longreprtext))
-    return Failure(rep.nodeid, when, where, streams(rep.sections), rep.longreprtext)
+        where = Where(path, None if line is None else line + 1, None, Text(_text(rep)))
+    return Failure(rep.nodeid, when, where, streams(rep.sections), _text(rep))
+
+
+def _text(rep: Any) -> str:
+    """The report's longrepr text without the `[gw0] platform -- Python ...` line pytest adds
+    when xdist attaches the worker node, so a report under xdist matches one without it."""
+    text = rep.longreprtext
+    if getattr(rep, "node", None) is not None and text.startswith("["):
+        return text.partition("\n")[2].strip()
+    return text
 
 
 def location(rep: Any) -> tuple[str, int | None]:

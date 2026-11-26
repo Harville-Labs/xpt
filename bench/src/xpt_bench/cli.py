@@ -70,7 +70,7 @@ def _run(args: argparse.Namespace) -> int:
             shutil.rmtree(root, ignore_errors=True)
     groups = report.summarize(runs)
     print()
-    print(report.render(groups, report.compare(groups, "stock")))
+    print(report.render(groups, report.compare(runs, "stock")))
     return 0
 
 
@@ -80,7 +80,9 @@ def _report(args: argparse.Namespace) -> int:
         runs += load_runs(path)
         judge_scores |= report.load_judge(path)
     groups = report.summarize(runs, judge_scores)
-    print(report.render(groups, report.compare(groups, args.baseline)))
+    verdicts = report.compare(runs, args.baseline, seed=args.seed)
+    show = report.render_json if args.json else report.render
+    print(show(groups, verdicts))
     return 0
 
 
@@ -136,6 +138,8 @@ def parser() -> argparse.ArgumentParser:
     rep = sub.add_parser("report", help="summarize one or more results directories")
     rep.add_argument("results", nargs="+", type=Path)
     rep.add_argument("--baseline", default="stock")
+    rep.add_argument("--seed", type=int, default=0, help="bootstrap seed")
+    rep.add_argument("--json", action="store_true", help="print JSON with every interval")
     rep.set_defaults(func=_report)
 
     jdg = sub.add_parser("judge", help="score diffs blind with codex and the rubric")

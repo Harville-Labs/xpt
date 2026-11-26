@@ -1,6 +1,6 @@
 # Prior art notes
 
-Read from source on 2026-11-19. Paths are relative to each repository root.
+Read from source on 2026-11-19, and pytest-testmon on 2026-11-26. Paths are relative to each repository root.
 
 | Project | Commit | License |
 |---|---|---|
@@ -8,6 +8,7 @@ Read from source on 2026-11-19. Paths are relative to each repository root.
 | 15r10nk/inline-snapshot | 4542e42 | MIT |
 | tophat/syrupy | 098dd11 | MIT |
 | approvals/ApprovalTests.Python | 32ccbd1 | Apache-2.0 |
+| tarpas/pytest-testmon | f536b09 | MIT |
 
 ## expecttest
 
@@ -71,6 +72,24 @@ Read from source on 2026-11-19. Paths are relative to each repository root.
 - It downloads helper scripts from GitHub at runtime unless `APPROVALTESTS_DISABLE_SCRIPT_DOWNLOADS=1` is set (`log_commons.py:11-33`).
 - Scrubbers are regex replacements to text (`scrubbers/scrubbers.py:12-76`). There are no path ignores and no tolerances.
 - No xdist handling. No JSON output.
+
+## pytest-testmon
+
+Read for `xpt affected` (#70), which selects the tests that ran changed code.
+
+- Depends on pytest and coverage.py (`pyproject.toml:29-32`). Lines are recorded by coverage.py with one dynamic context per test, `cov.switch_context(test_name)` (`testmon/testmon_core.py:715-725`), and read back in batches with `contexts_by_lineno` (`testmon_core.py:771-793`). It also tracks subprocesses through `COVERAGE_PROCESS_START` (`testmon_core.py:814-837`). It turns collection off under a debugger or a running coverage.py without pytest-cov (`testmon/configure.py:43-61`).
+- Storage is one SQLite file, `.testmondata`, or `TESTMON_DATAFILE` (`testmon_core.py:50-56`), with a data version (`testmon/db.py:11`). An optional cloud store, testmon.net, replaces it (`testmon/pytest_testmon.py:110-133`).
+- It fingerprints code, not lines. `Module.dump_and_block` turns each function body into a block and the module, with those bodies cut out, into one more block. Each block's checksum is the CRC32 of its `ast.dump` (`testmon/process_code.py:34-39,137-191`). A test keeps the checksums of the blocks it ran a line of (`process_code.py:298-313`), and it is affected when one of them is no longer in the file (`process_code.py:287-290`, `db.py:494-557`). So comments and formatting never select a test, and any change outside a function body selects every test that ran a line of the file. A module no test ran a line of, such as one that only holds constants, is never in a test's fingerprint.
+- It compares the files on disk with the last run, not with a git ref. A file's sha is read from disk, and `git ls-files --stage` only saves reading files git reports unmodified (`process_code.py:87-102,238-279`, `testmon_core.py:507-523`). Every run with `--testmon` updates the database for the tests it ran, so the map stays current without a separate full run.
+- It treats installed packages and the Python version as part of the environment. A changed package version reruns everything (`testmon_core.py:301-318`, `testmon/common.py:77-96`, `pytest_testmon.py:333-358`).
+- Selection happens inside pytest. Unaffected files are skipped at collection and unaffected tests deselected (`pytest_testmon.py:535-560`). Tests that failed last time always run (`pytest_testmon.py:516-526`). Tests with no data run (`testmon_core.py:63-78`). Selected tests are ordered by duration. `-k`, `-m`, `--lf`, and naming a test turn selection off (`configure.py:64-87`).
+- xdist: the controller decides and sends the selection to each worker in `workerinput`, and workers send their lines back on the teardown report (`pytest_testmon.py:407-430,451-483`).
+- Output is one header line with the changed files and counts, and a savings line (`pytest_testmon.py:286-358,568-614`). No test is listed with its reason, there is no JSON, and the selection can't be printed without running it.
+
+What xpt adds, and what it doesn't:
+
+- **Adds.** No dependencies: the lines come from xpt's own tracer, shared with `--xpt-trace`. A diff against any git ref (`--since`), so it answers "what does this branch affect" and not only "what changed since the last run". Each selected test is printed with its reason, as text or JSON, before anything runs, so an agent can read the selection and pass it to any command. A map that can't be trusted is named as stale, and every test runs. A changed module that the map run imported but no test ran a line of runs every test, where testmon selects none.
+- **Doesn't.** The map is built by a full run and replaced whole, not updated by each run. The granularity is the same as testmon's blocks, a function body or the code outside them, but xpt reads it from the diff's lines, so reformatting a line of code selects its tests where testmon's `ast.dump` checksum would not. Installed packages are not part of the map, so upgrading a dependency selects nothing. Subprocesses are not traced. Failing tests are not rerun unless they ran changed code.
 
 ## Prototype: call-site location without dependencies
 

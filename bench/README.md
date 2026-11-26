@@ -35,7 +35,7 @@ Agents use their CLIs' existing logins (`claude` and `codex` must already work i
 Then:
 
 ```sh
-uv run --project bench xpt-bench report bench/results/<dir> [more dirs] [--baseline stock]
+uv run --project bench xpt-bench report bench/results/<dir> [more dirs] [--baseline stock] [--json]
 uv run --project bench xpt-bench judge bench/results/<dir> [--model <codex model>]
 uv run --project bench xpt-bench check     # each task's seed fails and its solution passes
 ```
@@ -95,7 +95,18 @@ Each run is one JSON line in `runs.jsonl`. Usage comes from the agent's own even
 
 The report's "tokens" is the sum of uncached input, cache reads, cache writes, and output.
 
-`report` prints the median and `[min..max]` per task, agent, and variant, then a verdict per variant against the baseline. A variant wins only if its median tokens are lower while its solve rate is no lower and its wrong-accept and weakened-test rates are no higher. Token savings that come with more wrong accepts, fewer solves, or more weakened tests count as a loss.
+`report` prints the median and `[min..max]` per task, agent, and variant, with a 95% Wilson interval on the solve and wrong-accept rates. It then compares each variant with the baseline, per task and agent and for all tasks together, and says how many runs each arm had:
+
+- **tokens, tools, wall s**: the change in the median, variant over baseline, with a 95% percentile bootstrap interval (4000 resamples of each arm's runs, fixed seed, so the same runs always give the same report; `--seed` changes it).
+- **solved, wrong, weak**: the difference in rates in percentage points, with a 95% Newcombe interval built from each arm's Wilson interval.
+
+Each metric names the better arm (`xpt better`, `stock better`) only when its interval excludes no change. Otherwise it is a `tie`: a lower median inside the noise is not a win.
+
+The verdict is a **win** when the token interval lies wholly below no change, a **loss** when it lies wholly above, and a **tie** when it contains no change. Quality is a guard and gets no benefit of the doubt: a lower solve rate, or more wrong accepts or weakened tests, is a loss even when that difference is inside its interval. The `all` row combines tasks by the geometric mean of each task's median ratio, resampling within each task, so a task with a larger baseline does not outweigh the others. The pooled `all` row in the first table is descriptive only.
+
+The report ends with the resolution of the sweep: the median width of the per-task token intervals, and the runs per arm a ±10% token change needs, assuming the width shrinks with the square root of the runs. In the published 60-run sweep, 5 runs per arm give intervals of about ±24%, so a ±10% change needs about 25 runs per arm per task. At 5 runs, only `inventory` with `claude:sonnet` (-32%) and the `claude:sonnet` all-tasks row (-15%) resolve as wins; every other cell is a tie.
+
+`report --json` prints the same groups and verdicts, with every interval, as JSON.
 
 ## Judge
 

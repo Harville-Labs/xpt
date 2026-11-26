@@ -1,32 +1,34 @@
-Median [min..max] per task, agent, and variant.
-task       agent          variant  n   solved  wrong  weak  tokens                   output             cost                  tools        test runs  wall s                judge
----------  -------------  -------  --  ------  -----  ----  -----------------------  -----------------  --------------------  -----------  ---------  --------------------  -----
-all        claude:sonnet  stock    15  15/15   0      0     111.3k [82.3k..168.3k]   2.2k [1.6k..3.0k]  $0.08 [$0.06..$0.11]  13 [8..17]   4 [2..5]   16.80 [12.90..22.20]  -
-all        claude:sonnet  xpt      15  15/15   0      0     97.0k [80.2k..122.1k]    1.8k [1.6k..2.3k]  $0.07 [$0.06..$0.10]  11 [8..13]   3 [2..5]   15.70 [13.50..18.10]  -
-all        codex:default  stock    15  15/15   0      0     139.0k [127.2k..231.0k]  851 [728..1.5k]    -                     10 [7..16]   2 [2..6]   25.20 [21.50..39.30]  -
-all        codex:default  xpt      15  15/15   0      0     148.2k [120.8k..208.9k]  846 [690..1.2k]    -                     12 [7..19]   2 [2..3]   25.60 [22.50..33.90]  -
-inventory  claude:sonnet  stock    5   5/5     0      0     141.8k [115.4k..168.3k]  2.4k [2.1k..2.8k]  $0.08 [$0.08..$0.11]  12 [11..12]  4 [4..5]   19.50 [18.40..22.20]  -
-inventory  claude:sonnet  xpt      5   5/5     0      0     95.8k [81.8k..122.1k]    1.8k [1.6k..2.0k]  $0.09 [$0.06..$0.10]  8 [8..10]    4 [4..5]   15.70 [14.80..18.10]  -
-inventory  codex:default  stock    5   5/5     0      0     163.6k [136.1k..231.0k]  1.1k [956..1.5k]   -                     11 [9..16]   3 [2..6]   30.20 [25.20..39.30]  -
-inventory  codex:default  xpt      5   5/5     0      0     148.9k [147.4k..208.9k]  1.0k [932..1.2k]   -                     15 [11..19]  3 [2..3]   29.80 [27.70..33.90]  -
-ledger     claude:sonnet  stock    5   5/5     0      0     108.1k [89.6k..117.5k]   2.2k [1.6k..3.0k]  $0.08 [$0.07..$0.09]  13 [8..17]   3 [2..4]   16.80 [13.50..21.80]  -
-ledger     claude:sonnet  xpt      5   5/5     0      0     97.5k [81.6k..97.9k]     2.1k [1.8k..2.3k]  $0.07 [$0.06..$0.07]  12 [11..12]  3 [2..3]   16.50 [14.60..17.20]  -
-ledger     codex:default  stock    5   5/5     0      0     137.9k [133.2k..155.8k]  738 [728..836]     -                     9 [9..12]    2 [2..2]   24.40 [22..27.30]     -
-ledger     codex:default  xpt      5   5/5     0      0     148.6k [126.2k..158.6k]  766 [690..892]     -                     9 [7..13]    2 [2..3]   23.50 [22.50..25.60]  -
-textkit    claude:sonnet  stock    5   5/5     0      0     97.8k [82.3k..111.3k]    2.1k [1.8k..2.3k]  $0.07 [$0.06..$0.07]  13 [12..13]  4 [3..4]   15.70 [12.90..15.90]  -
-textkit    claude:sonnet  xpt      5   5/5     0      0     97.0k [80.2k..105.4k]    1.8k [1.8k..2.3k]  $0.06 [$0.06..$0.07]  12 [9..13]   3 [2..5]   15 [13.50..15.90]     -
-textkit    codex:default  stock    5   5/5     0      0     154.6k [127.2k..161.4k]  851 [762..971]     -                     8 [7..11]    3 [2..4]   24.20 [21.50..27.70]  -
-textkit    codex:default  xpt      5   5/5     0      0     123.5k [120.8k..148.2k]  793 [770..955]     -                     12 [8..13]   2 [2..3]   25.20 [22.50..26.70]  -
+Median [min..max] per task, agent, and variant. Solved and wrong show the count with a 95% Wilson interval for the rate.
+task       agent          variant  n   solved             wrong           weak  tokens                   output             cost                  tools        test runs  wall s                judge
+---------  -------------  -------  --  -----------------  --------------  ----  -----------------------  -----------------  --------------------  -----------  ---------  --------------------  -----
+all        claude:sonnet  stock    15  15/15 [80%..100%]  0/15 [0%..20%]  0     111.3k [82.3k..168.3k]   2.2k [1.6k..3.0k]  $0.08 [$0.06..$0.11]  13 [8..17]   4 [2..5]   16.80 [12.90..22.20]  -
+all        claude:sonnet  xpt      15  15/15 [80%..100%]  0/15 [0%..20%]  0     97.0k [80.2k..122.1k]    1.8k [1.6k..2.3k]  $0.07 [$0.06..$0.10]  11 [8..13]   3 [2..5]   15.70 [13.50..18.10]  -
+all        codex:default  stock    15  15/15 [80%..100%]  0/15 [0%..20%]  0     139.0k [127.2k..231.0k]  851 [728..1.5k]    -                     10 [7..16]   2 [2..6]   25.20 [21.50..39.30]  -
+all        codex:default  xpt      15  15/15 [80%..100%]  0/15 [0%..20%]  0     148.2k [120.8k..208.9k]  846 [690..1.2k]    -                     12 [7..19]   2 [2..3]   25.60 [22.50..33.90]  -
+inventory  claude:sonnet  stock    5   5/5 [57%..100%]    0/5 [0%..43%]   0     141.8k [115.4k..168.3k]  2.4k [2.1k..2.8k]  $0.08 [$0.08..$0.11]  12 [11..12]  4 [4..5]   19.50 [18.40..22.20]  -
+inventory  claude:sonnet  xpt      5   5/5 [57%..100%]    0/5 [0%..43%]   0     95.8k [81.8k..122.1k]    1.8k [1.6k..2.0k]  $0.09 [$0.06..$0.10]  8 [8..10]    4 [4..5]   15.70 [14.80..18.10]  -
+inventory  codex:default  stock    5   5/5 [57%..100%]    0/5 [0%..43%]   0     163.6k [136.1k..231.0k]  1.1k [956..1.5k]   -                     11 [9..16]   3 [2..6]   30.20 [25.20..39.30]  -
+inventory  codex:default  xpt      5   5/5 [57%..100%]    0/5 [0%..43%]   0     148.9k [147.4k..208.9k]  1.0k [932..1.2k]   -                     15 [11..19]  3 [2..3]   29.80 [27.70..33.90]  -
+ledger     claude:sonnet  stock    5   5/5 [57%..100%]    0/5 [0%..43%]   0     108.1k [89.6k..117.5k]   2.2k [1.6k..3.0k]  $0.08 [$0.07..$0.09]  13 [8..17]   3 [2..4]   16.80 [13.50..21.80]  -
+ledger     claude:sonnet  xpt      5   5/5 [57%..100%]    0/5 [0%..43%]   0     97.5k [81.6k..97.9k]     2.1k [1.8k..2.3k]  $0.07 [$0.06..$0.07]  12 [11..12]  3 [2..3]   16.50 [14.60..17.20]  -
+ledger     codex:default  stock    5   5/5 [57%..100%]    0/5 [0%..43%]   0     137.9k [133.2k..155.8k]  738 [728..836]     -                     9 [9..12]    2 [2..2]   24.40 [22..27.30]     -
+ledger     codex:default  xpt      5   5/5 [57%..100%]    0/5 [0%..43%]   0     148.6k [126.2k..158.6k]  766 [690..892]     -                     9 [7..13]    2 [2..3]   23.50 [22.50..25.60]  -
+textkit    claude:sonnet  stock    5   5/5 [57%..100%]    0/5 [0%..43%]   0     97.8k [82.3k..111.3k]    2.1k [1.8k..2.3k]  $0.07 [$0.06..$0.07]  13 [12..13]  4 [3..4]   15.70 [12.90..15.90]  -
+textkit    claude:sonnet  xpt      5   5/5 [57%..100%]    0/5 [0%..43%]   0     97.0k [80.2k..105.4k]    1.8k [1.8k..2.3k]  $0.06 [$0.06..$0.07]  12 [9..13]   3 [2..5]   15 [13.50..15.90]     -
+textkit    codex:default  stock    5   5/5 [57%..100%]    0/5 [0%..43%]   0     154.6k [127.2k..161.4k]  851 [762..971]     -                     8 [7..11]    3 [2..4]   24.20 [21.50..27.70]  -
+textkit    codex:default  xpt      5   5/5 [57%..100%]    0/5 [0%..43%]   0     123.5k [120.8k..148.2k]  793 [770..955]     -                     12 [8..13]   2 [2..3]   25.20 [22.50..26.70]  -
 
-task       agent          variant       tokens  solved        wrong     weak      verdict
----------  -------------  ------------  ------  ------------  --------  --------  -------
-all        claude:sonnet  xpt vs stock  -13%    100% vs 100%  0% vs 0%  0% vs 0%  win
-all        codex:default  xpt vs stock  +7%     100% vs 100%  0% vs 0%  0% vs 0%  no gain
-inventory  claude:sonnet  xpt vs stock  -32%    100% vs 100%  0% vs 0%  0% vs 0%  win
-inventory  codex:default  xpt vs stock  -9%     100% vs 100%  0% vs 0%  0% vs 0%  win
-ledger     claude:sonnet  xpt vs stock  -10%    100% vs 100%  0% vs 0%  0% vs 0%  win
-ledger     codex:default  xpt vs stock  +8%     100% vs 100%  0% vs 0%  0% vs 0%  no gain
-textkit    claude:sonnet  xpt vs stock  -1%     100% vs 100%  0% vs 0%  0% vs 0%  win
-textkit    codex:default  xpt vs stock  -20%    100% vs 100%  0% vs 0%  0% vs 0%  win
+Variant against baseline: change in median or rate (pp) [95% interval], better arm.
+task       agent          variant       n         tokens                        tools                         wall s                       solved                   wrong                    weak                     verdict
+---------  -------------  ------------  --------  ----------------------------  ----------------------------  ---------------------------  -----------------------  -----------------------  -----------------------  -------
+all        claude:sonnet  xpt vs stock  15 vs 15  -15% [-24%..-3%] xpt better   -17% [-29%..-3%] xpt better   -9% [-17%..-1%] xpt better   +0pp [-20pp..+20pp] tie  +0pp [-20pp..+20pp] tie  +0pp [-20pp..+20pp] tie  win
+all        codex:default  xpt vs stock  15 vs 15  -8% [-16%..+13%] tie          +27% [-12%..+53%] tie         +0% [-14%..+7%] tie          +0pp [-20pp..+20pp] tie  +0pp [-20pp..+20pp] tie  +0pp [-20pp..+20pp] tie  tie
+inventory  claude:sonnet  xpt vs stock  5 vs 5    -32% [-43%..-12%] xpt better  -33% [-33%..-17%] xpt better  -19% [-29%..-7%] xpt better  +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  win
+inventory  codex:default  xpt vs stock  5 vs 5    -9% [-36%..+35%] tie          +36% [-25%..+89%] tie         -1% [-25%..+18%] tie         +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  tie
+ledger     claude:sonnet  xpt vs stock  5 vs 5    -10% [-28%..+9%] tie          -8% [-29%..+50%] tie          -2% [-24%..+22%] tie         +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  tie
+ledger     codex:default  xpt vs stock  5 vs 5    +8% [-9%..+17%] tie           +0% [-30%..+44%] tie          -4% [-14%..+7%] tie          +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  tie
+textkit    claude:sonnet  xpt vs stock  5 vs 5    -1% [-18%..+27%] tie          -8% [-31%..+0%] tie           -4% [-14%..+16%] tie         +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  tie
+textkit    codex:default  xpt vs stock  5 vs 5    -20% [-23%..+14%] tie         +50% [-18%..+71%] tie         +4% [-17%..+17%] tie         +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  +0pp [-43pp..+43pp] tie  tie
 
-Rule: a variant beats the baseline only if its median tokens are lower while its solve rate is no lower and its wrong-accept and weakened-test rates are no higher. Token savings that come with more wrong accepts, fewer solves, or more weakened tests count as a loss.
+Rule: tokens, tools, and wall s show the variant's median as a change from the baseline's with a 95% bootstrap interval; solved, wrong, and weak show the difference in rates with a 95% Newcombe-Wilson interval. A metric names the better arm only when its interval excludes no change, and is a tie otherwise. The verdict is a win only when the token interval lies wholly below no change, a loss when it lies wholly above, and a tie otherwise. Quality is a guard: a lower solve rate or more wrong accepts or weakened tests is a loss even inside the interval. The all row is the geometric mean of the per-task ratios, resampled within each task, not a pool of raw runs.
+Resolution: at 5 runs per arm the median per-task token interval is about ±24%. Resolving a ±10% token change needs about 25 runs per arm per task.

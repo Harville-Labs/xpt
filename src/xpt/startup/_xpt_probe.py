@@ -178,7 +178,8 @@ class Probe:
             self._monitor()
         else:
             self._settrace()
-        os.register_at_fork(after_in_child=self._reset)
+        if sys.platform != "win32":
+            os.register_at_fork(after_in_child=self._reset)
         import atexit
 
         atexit.register(self.finish)

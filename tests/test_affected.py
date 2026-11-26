@@ -2,6 +2,7 @@
 that ran the lines `git diff` shows changed, in a fixture repository."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -109,6 +110,10 @@ def edit(project: pytest.Pytester, name: str, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
     assert old in text
     path.write_text(text.replace(old, new), encoding="utf-8")
+    # A same-size edit within the same second leaves the cached bytecode looking fresh, so
+    # move the mtime forward to make Python and pytest's assertion rewriter recompile.
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
 
 
 def selected(capsys: pytest.CaptureFixture[str], *args: str) -> dict[str, str]:

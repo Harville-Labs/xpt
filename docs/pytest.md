@@ -56,7 +56,7 @@ The `accept:` line accepts one call site, the one whose diff is right above it. 
 | `--xpt-json=PATH` | | Also write the full report, with no limits, as [JSON](json.md#pytest-xpt-json). |
 | `--xpt-deterministic` | | Pin the clock, `random`, and `uuid` for every test, as the `xpt_deterministic` fixture does. See [Deterministic tests](#deterministic-tests). |
 | `--xpt-trace` | | Record the project lines each failing test ran, so `xpt show` and `xpt accept` print the [changed code it ran](cli.md#changed-code). |
-| `--xpt-map` | | Record the project lines every test ran in `.xpt/map.json`, so [`xpt affected`](cli.md#xpt-affected----command-arg-) can select the tests that ran changed code. Build it from a full run. An interrupted session keeps the old map. |
+| `--xpt-map` | | Record the project lines every test ran in `.xpt/map.json`, so [`xpt affected`](cli.md#xpt-affected-command-arg) can select the tests that ran changed code. Build it from a full run. An interrupted session keeps the old map. |
 | | `XPT_COVERAGE=DIR` | Set by [`xpt coverage`](cli.md#xpt-coverage): trace every project line the session runs and write them under `DIR`. Not meant to be set by hand. |
 
 ## Deterministic tests

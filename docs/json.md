@@ -14,6 +14,19 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 | `float("nan")` | `{"float": "nan"}` |
 | `Point(1, "a")` from module `values` | `{"values:Point": {"x": 1, "y": "a"}}` |
 | `ValueError("bad", 3)` | `{"builtins:ValueError": {"*": {"tuple": ["bad", 3]}}}` |
+| `datetime(2000, 1, 2, 3, tzinfo=timezone.utc)` | `{"datetime:datetime": {"year": 2000, "month": 1, "day": 2, "hour": 3, "minute": 0, "second": 0, "microsecond": 0, "tzinfo": {"ref": "datetime:timezone.utc"}}}` |
+| `date(2000, 1, 2)` | `{"datetime:date": {"year": 2000, "month": 1, "day": 2}}` |
+| `time(9, 30)` | `{"datetime:time": {"hour": 9, "minute": 30, "second": 0, "microsecond": 0}}` |
+| `timedelta(seconds=90)` | `{"datetime:timedelta": {"days": 0, "seconds": 90, "microseconds": 0}}` |
+| `timezone(timedelta(seconds=3600), name="CET")` | `{"datetime:timezone": {"": {"datetime:timedelta": {...}}, "name": "CET"}}` |
+| `ZoneInfo("Europe/London")` | `{"zoneinfo:ZoneInfo": {"": "Europe/London"}}` |
+| `UUID("00000000-0000-4000-8000-000000000001")` | `{"uuid:UUID": {"": "00000000-0000-4000-8000-000000000001"}}` |
+| `Decimal("1.10")` | `{"decimal:Decimal": {"": "1.10"}}` |
+| `Path("a/b")`, `PurePosixPath("/a")`, `PureWindowsPath("C:/a")` | `{"pathlib:Path": {"": "a/b"}}`, `{"pathlib:PurePosixPath": {"": "/a"}}`, `{"pathlib:PureWindowsPath": {"": "C:/a"}}` |
+| `Color.RED` from module `shop` | `{"ref": "shop:Color.RED"}` |
+| `Perm.R \| Perm.W` from module `shop` | `{"shop:Perm": {"": 3}}` |
+
+A constructor call's field `""` is its one positional argument and adds no step to a path. A date or time records every field, so a diff reads `value.hour: 0 -> 12`. `tzinfo` is left out when it is `None` and `fold` when it is 0. The integer fields must be in range and a `timedelta` normalized, as Python stores it. A UUID is its lowercase hyphenated text, a decimal is `str(Decimal)`, which keeps the exponent, and a path is its text with forward slashes. Reading a record refuses any of these that is malformed or not in that canonical form, rather than writing a different value than was recorded.
 
 `expected` is left out when there is none, so a recorded `None` stays distinct from a missing expectation.
 

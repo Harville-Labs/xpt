@@ -65,7 +65,8 @@ A value that holds the current time, a fresh UUID, or a random choice changes on
 def test_create(xpt_deterministic):
     order = create_order()
     expect(
-        order, {"id": "00000000-0000-4000-8000-000000000001", "created_at": "2000-01-01T00:00:00"}
+        order,
+        {"id": UUID("00000000-0000-4000-8000-000000000001"), "created_at": datetime(2000, 1, 1)},
     )
 
 
@@ -85,7 +86,7 @@ While the test runs:
 
 A module in your project that imported a name directly, as in `from datetime import datetime` or `from uuid import uuid4`, is pinned too. Installed packages and the standard library keep what they imported, and so does C code: a library that did `from time import time` reads the real clock. `time.monotonic()`, `time.perf_counter()`, `time.sleep()`, `time.localtime()`, `os.urandom()`, `secrets`, and `random.SystemRandom` are not pinned, so timeouts and durations still work. The patch is process-wide, so other threads see the pinned clock too.
 
-xpt doesn't record `datetime` or `UUID` objects yet, so expect `value.isoformat()` or `str(value)`, as above.
+xpt records `datetime` and `UUID` values as the calls that rebuild them, so the pinned values are expected directly, as above. Accept adds `from datetime import datetime` and `from uuid import UUID` when the file has neither.
 
 The flaky report names the fixture when a path that changed between runs looks like a timestamp or a UUID.
 

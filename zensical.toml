@@ -12,6 +12,7 @@ nav = [
     { "expect()" = "expect.md" },
     { "Reviewing failures" = "review.md" },
     { "pytest report" = "pytest.md" },
+    { "Tracebacks outside pytest" = "traceback.md" },
     { "Coding agents" = "agents.md" },
   ] },
   { "Reference" = [

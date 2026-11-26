@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import convert, decisions, flaky, init, render
+from xpt import convert, decisions, flaky, init, render, traceback
 from xpt.accept import AcceptError, AcceptResult, accept, lock
 from xpt.group import Group, group, missing, pick
 from xpt.record import (
@@ -246,7 +246,27 @@ def _parser() -> argparse.ArgumentParser:
     sub = add("convert", convert_command, "rewrite assert x == literal as expect(x, literal)")
     sub.add_argument("paths", nargs="+", type=Path, metavar="path")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub = commands.add_parser(
+        "run",
+        help="run a command whose Python processes print compact tracebacks",
+        usage="xpt run [-v] -- command [arg ...]",
+    )
+    sub.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="raise the limits; -vv prints Python's full traceback",
+    )
+    sub.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
     return parser
+
+
+def _run(argv: Sequence[str], verbose: int) -> int:
+    command = list(argv[1:] if argv[:1] == ["--"] else argv)
+    if not command:
+        raise UsageError("xpt run needs a command, as in xpt run -- python app.py.")
+    return traceback.run(command, verbose)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -255,6 +275,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             stream.reconfigure(encoding="utf-8")
     try:
         args = _parser().parse_args(argv)
+        if args.command == "run":
+            return _run(args.argv, args.verbose)
         output: Output = args.handler(args, args.root)
     except (UsageError, RecordError, AcceptError, convert.ConvertError, init.InitError) as error:
         print(f"xpt: error: {error}", file=sys.stderr)

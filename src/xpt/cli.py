@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import convert, decisions, flaky, init, render, trace, traceback
+from xpt import convert, decisions, env, flaky, init, render, trace, traceback
 from xpt.accept import AcceptError, AcceptResult, accept, lock
 from xpt.changed import ChangedCode, Diff, changed_code
 from xpt.changes import GitError, changes
@@ -221,6 +221,10 @@ def convert_command(args: argparse.Namespace, root: Path) -> Output:
     )
 
 
+def env_command(args: argparse.Namespace, root: Path) -> Output:
+    return Output(*env.command(root, args.name, os.environ))
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise UsageError(f"{message}. Run {self.prog} --help for usage.")
@@ -278,6 +282,8 @@ def _parser() -> argparse.ArgumentParser:
     sub = add("convert", convert_command, "rewrite assert x == literal as expect(x, literal)")
     sub.add_argument("paths", nargs="+", type=Path, metavar="path")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub = add("env", env_command, "report the interpreter, shadowed modules, and lockfile drift")
+    sub.add_argument("name", nargs="?", help="a module to locate without importing it")
     sub = commands.add_parser(
         "run",
         help="run a command whose Python processes print compact tracebacks",

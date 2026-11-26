@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp} [options]
+xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp,env} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -175,6 +175,47 @@ Asserts that are not an `==` comparison are left alone without a report. A file 
 |---|---|
 | `--dry-run` | Report what would change and write nothing. |
 
+### `xpt env [NAME]`
+
+Report the interpreter running xpt and what is wrong with the environment around it: modules that shadow the standard library or an installed package, and installed versions that drift from the lockfile. It prints one line for the interpreter and one per problem, and exits `1` when there is a problem. A clean environment prints one line:
+
+```text
+python 3.12.7 at .venv/bin/python (venv: .venv, matches uv.lock)
+```
+
+```text
+python 3.12.7 at .venv/bin/python (venv: .venv, differs from uv.lock)
+shadowing: json.py shadows the standard library module json
+mismatch: requests 2.31.0 installed, uv.lock wants 2.32.3
+missing: idna is not installed, uv.lock wants 3.7
+```
+
+The root is the nearest directory up from `--root` that holds `pyproject.toml` or `.git`. Paths inside it are relative, others absolute. It reads files and package metadata, never imports a project module, and writes nothing.
+
+| Line | Means |
+|---|---|
+| `interpreter:` | `VIRTUAL_ENV` names another environment than the one running xpt, the project has a `.venv` that xpt is not running in, or `.python-version` asks for another Python. |
+| `shadowing:` | A `name.py` or a `name/__init__.py` in the root, or in `sys.path[0]` when that is another directory outside the interpreter, has the name of a standard library module or of a top-level module of an installed distribution. The project's own distribution, named in `pyproject.toml` or installed editable from the root, does not count. |
+| `mismatch:` | An installed version differs from the locked one. `1.0` and `1.0.0` are equal. |
+| `missing:` | A package every environment needs is not installed. |
+| `lockfile:` | A lockfile could not be read. |
+
+The lockfiles are `uv.lock`, `poetry.lock`, and every `requirements*.txt` in the root. Each locked package that is installed is compared. Whether one that is not installed is missing depends on the file, because a lock also lists packages for other platforms, extras, and groups:
+
+- `uv.lock`: missing when it is reachable from the project's own package through dependencies with no marker, following extras. Dependency groups such as `dev` are not followed.
+- `poetry.lock`: missing when it is in the `main` group, not optional, and has no markers.
+- `requirements*.txt`: each `name==version` line without an environment marker. Other lines are ignored.
+
+`xpt env NAME` locates the module `NAME` as `import NAME` would with the root first on `sys.path`, as `python -m` and `python -c` run from the root have it. It finds the module without importing it or its parent packages, and prints where it comes from and the distribution that installed it:
+
+```text
+requests 2.32.3 from .venv/lib/python3.12/site-packages/requests/__init__.py
+yaml (PyYAML 6.0.2) from .venv/lib/python3.12/site-packages/yaml/__init__.py
+json from /usr/lib/python3.12/json/__init__.py (standard library)
+```
+
+It exits `1` when the module is not found, or when it would come from a project file that shadows the standard library or an installed package, which it reports on a second `shadowing:` line.
+
 ### `xpt run [-v] -- COMMAND [ARG ...]`
 
 Run a command so that every Python process it starts prints uncaught exceptions in the compact shape of the pytest report, described in [Tracebacks outside pytest](traceback.md). It sets `XPT_TRACEBACK` and puts a `sitecustomize` module that installs the hooks first on `PYTHONPATH`. The exit code is the command's, and 127 when it can't be started. `--json` and `--root` do not apply.
@@ -197,7 +238,7 @@ Serve `failures`, `show`, `accept`, `reject`, `runs`, and `flaky` as MCP tools o
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
-| `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, or an `init` check found a problem. |
+| `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, an `init` check found a problem, or `env` found a problem or no module `NAME`. |
 | `2` | A usage error, such as `xpt run` without a command, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, unpaired markers in `AGENTS.md`, or a malformed `.mcp.json` with `init --mcp`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files

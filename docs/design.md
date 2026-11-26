@@ -237,6 +237,7 @@ xpt accept --missing        fill every missing expectation, nothing else
 xpt accept --all            every group not rejected; those that cannot be accepted are reported with their reason
 xpt runs                    the recorded runs, newest first
 xpt flaky                   call sites whose values changed between stored runs with the same source
+xpt env [NAME]              the interpreter, shadowed modules, and lockfile drift; or where NAME imports from
 xpt clean                   delete .xpt/
 xpt reject <id>...          record each group's actual value as a bug, never to be offered
 ```
@@ -246,7 +247,7 @@ Every command takes `--json`, and `--root PATH` for a project other than the cur
 Exit codes:
 
 - `0`: the command did what it was asked, or there is nothing to do.
-- `1`: `failures` found failures, `flaky` found flaky call sites, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
+- `1`: `failures` found failures, `flaky` found flaky call sites, `env` found a problem, or `accept` or `reject` left a requested group stale, skipped, or suspect, or the tests that `accept --verify` reran failed.
 - `2`: a usage error, an unknown id or run, no `.xpt/latest`, a malformed record or decision, or a held `.xpt/accept.lock`. The error is one line on stderr that says what to do next, and nothing is written.
 
 Accept is a state machine per observation group: `recorded -> accepted | rejected | stale`. A group moves to `stale` when its fingerprint check fails. It moves to `rejected` when `xpt reject` records its actual value as a bug.
@@ -611,6 +612,17 @@ RuntimeError: load failed
 
 On the crash fixtures in `tests/crash_project.py`, the compact traceback is about a fifth of Python's on stderr, and the tests require at most a third.
 
+## Environment report
+
+Agents lose turns to environment problems that look like code problems: the wrong interpreter, a local `json.py` shadowing the standard library, or an installed version that differs from the lockfile. Each shows up as a confusing import error or a wrong-API failure, and the agent debugs the code. `xpt env` reports them in one call.
+
+- **Scope: a subcommand, not a separate package.** It is far from expect testing, but it answers the question an agent asks right after a failing run it can't explain, so it belongs next to `xpt failures`. It costs no dependency and no startup time for anything else: one module and a few lockfile parsers in the standard library. A separate package would be one more tool to install and to tell agents about, for about 600 lines. It stays read-only, never imports a project module, and never touches the network, so running it is always safe. If it grows past reporting, such as fixing the environment, that part is a separate tool.
+- **Problems only.** It prints one line for the interpreter and one line per problem, so a clean environment costs one line and an agent can run it freely. It exits `1` on a problem, like `failures`.
+- **Shadowing** covers the root and `sys.path[0]`, the two directories Python puts in front of the standard library and site-packages. Built-in modules such as `sys` can't be shadowed and are skipped. The project's own distribution is not a shadow of itself. Test directories that pytest's `prepend` import mode puts on `sys.path` are not searched.
+- **Drift needs to know what should be installed.** A uv lock is universal: it lists packages for every platform, extra, and group. Evaluating PEP 508 markers needs a marker and version parser that the standard library does not have, so drift reports every mismatch of an installed package, and reports a package missing only when every environment needs it: in `uv.lock`, reachable from the project through edges with no marker; in `poetry.lock`, in `main`, not optional, and without markers; in `requirements*.txt`, a pinned line without a marker. The cost is that a missing package behind a marker, or in a group that was meant to be installed, goes unreported.
+- **`xpt env NAME` never imports.** It asks the meta path finders, with the root first on `sys.path`, and walks a dotted name through each package's `submodule_search_locations` with `PathFinder`, because `importlib.util.find_spec("a.b")` imports `a`. The owning distribution is the one whose `RECORD` lists the file, or an editable install whose source directory holds it.
+- **Not in the pytest plugin yet.** A shadowing line when a test fails to import would catch the problem where it appears, but the xpt report has no slot for it today. It is a follow-up.
+
 ## Concurrency
 
 - xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` and `--expect-accept` run in the controller's `pytest_sessionfinish`, after every worker has finished. The report drops the `[gw0] platform -- Python ...` line pytest puts at the top of each failure's text under xdist, so the report and `--xpt-json` match a run without xdist.
@@ -662,4 +674,5 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **Setup and migration.** `xpt init` and `xpt convert` are done.
 - **Tracebacks outside pytest.** `xpt run` and `xpt.traceback.install()` are done.
 - **MCP server.** `xpt mcp` and `xpt init --mcp` are done. Comparing it with the CLI in the agent benchmark is part of M5.
+- **Environment report.** `xpt env` and `xpt env NAME` are done. A shadowing line in the pytest report when a test module fails to import is next.
 - **M6. Release.** Name check, docs, PyPI.

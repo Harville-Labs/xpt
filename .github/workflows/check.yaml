@@ -27,6 +27,16 @@ jobs:
       - run: uv run ty check
       - run: uv run pytest
 
+  xdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+      - run: uv sync --locked
+      - run: uv run pytest -n 4
+
   adapters:
     strategy:
       fail-fast: false

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from xpt import (
+    affected,
     apiview,
     convert,
     decisions,
@@ -280,6 +282,42 @@ def coverage_command(args: argparse.Namespace, root: Path) -> Output:
     return Output(code, uncovered.lines(found, full=args.full), uncovered.to_json(found))
 
 
+def affected_command(args: argparse.Namespace, root: Path) -> Output:
+    result = affected.affected(root, args.since)
+    data = affected.to_json(result)
+    lines = affected.lines(result)
+    if result.everything is None and result.tests:
+        lines.append("Next: xpt affected -- pytest")
+    return Output(0, lines, data)
+
+
+def _affected_run(args: argparse.Namespace, command: list[str]) -> int:
+    """Run `command` with the selected tests, or with none to run them all, and exit as it
+    does. Nothing selected runs nothing, unless --all-if-empty."""
+    if args.json:
+        raise UsageError("--json prints the selection; drop it to run the tests.")
+    root: Path = args.root
+    result = affected.affected(root, args.since)
+    lines = affected.lines(result)
+    tests = [p.test for p in result.tests]
+    if result.everything is None and not tests:
+        if not args.all_if_empty:
+            print("\n".join([*lines, "Nothing to run."]), flush=True)
+            return 0
+        lines.append("Running every test, as --all-if-empty asks.")
+    if command[0] == "pytest":
+        command = [sys.executable, "-m", "pytest", *command[1:]]
+    print("\n".join(lines), flush=True)
+    try:
+        return subprocess.run([*command, *tests], cwd=root, check=False).returncode
+    except OSError as error:
+        raise UsageError(f"can't run {command[0]}: {error.strerror or error}") from None
+
+
+def _command(argv: Sequence[str]) -> list[str]:
+    return list(argv[1:] if argv[:1] == ["--"] else argv)
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise UsageError(f"{message}. Run {self.prog} --help for usage.")
@@ -340,6 +378,22 @@ def _parser() -> argparse.ArgumentParser:
     sub = add("init", init_command, "add xpt's agent instructions to AGENTS.md and check pytest")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
     sub.add_argument("--mcp", action="store_true", help="also add xpt mcp to .mcp.json")
+    sub = add(
+        "affected",
+        affected_command,
+        "list the tests that ran the changed code, or run them with -- pytest [args]",
+    )
+    sub.add_argument(
+        "--since",
+        metavar="REF",
+        help="the git ref to diff against (default: the commit the map was built at)",
+    )
+    sub.add_argument(
+        "--all-if-empty",
+        action="store_true",
+        help="run every test when the changes select none, instead of nothing",
+    )
+    sub.add_argument("argv", nargs=argparse.REMAINDER, metavar="-- command")
     sub = add("convert", convert_command, "rewrite assert x == literal as expect(x, literal)")
     sub.add_argument("paths", nargs="+", type=Path, metavar="path")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
@@ -406,7 +460,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _run(argv: Sequence[str], verbose: int) -> int:
-    command = list(argv[1:] if argv[:1] == ["--"] else argv)
+    command = _command(argv)
     if not command:
         raise UsageError("xpt run needs a command, as in xpt run -- python app.py.")
     return traceback.run(command, verbose)
@@ -423,6 +477,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = _parser().parse_args(argv)
         if args.command == "run":
             return _run(args.argv, args.verbose)
+        if args.command == "affected" and (command := _command(args.argv)):
+            return _affected_run(args, command)
         if args.command == "mcp":
             from xpt import mcp
 

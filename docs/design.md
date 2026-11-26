@@ -143,12 +143,18 @@ Trace           # the project lines each recorded test ran, from pytest --xpt-tr
   tests: {test: {path: [int]}}  # node id -> 1-based lines it ran, with the module and class
                                 # body lines of each file it ran
 
+Map             # the project lines every test ran, from pytest --xpt-map (see Affected tests)
+  commit: str | None      # HEAD when the map was built, None without git
+  files: {path: str}      # sha256, with \r\n as \n, of each file the run imported or ran
+  tests: {test: {path: [int]}}  # node id -> 1-based lines it ran, without module bodies
+
 Hunk            # one run of changed lines from git diff, against the working tree
   path: str
   start: int              # first new-side line; for a removal, the line before it
   count: int              # new-side lines, 0 for a removal
   removed: [str]
   added: [str]
+  old_start: int          # first removed line in the base; for an addition, the line before it
 
 ChangedCode     # what show and accept print under a group (see Changed code)
   status: "ran" | "none_ran" | "no_trace" | "no_git"
@@ -228,6 +234,7 @@ pytest run
     compare -> pass: nothing written
             -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
   with --xpt-trace: the project lines of each test that recorded one, in <worker>.trace.json
+  with --xpt-map: the project lines of every test, joined into .xpt/map.json at session end
   session end: with --expect-accept, accept the named groups (as xpt accept <id>)
                with --expect-create, accept the run's other missing groups (as xpt accept --missing)
                one block per failure, a one-line footer with the next command, pytest's exit code
@@ -246,6 +253,8 @@ xpt coverage [--since REF] -- pytest ...   changed lines no test ran, by functio
 xpt coverage --from-coverage [PATH]        the same, from coverage.py's data file
 xpt clean                   delete .xpt/
 xpt reject <id>...          record each group's actual value as a bug, never to be offered
+xpt affected [--since REF]  the tests that ran the changed code, each with its reason (see Affected tests)
+xpt affected -- pytest ...  run them, and exit with pytest's code
 ```
 
 Every command takes `--json`, and `--root PATH` for a project other than the current directory. `failures`, `show`, `accept`, and `reject` take `--run ID` to read an older run instead of the latest. `python -m xpt` runs the same command.
@@ -347,7 +356,7 @@ Next: xpt accept 7f3a
 - **The intersection.** A hunk ran when the test ran one of its new lines. A removal ran when the test ran the line on either side of it. A file whose sha256 differs from the trace's changed after the run, so its line numbers no longer hold. It is left out and named on a `changed since the run, left out:` line. Hunks are grouped by the innermost function or class around their first line, from the working tree's syntax tree, `<module>` at module level, and printed with the common indentation removed. The default limits are 10 lines of 80 characters, and `--full` lifts them.
 - **Nothing ran.** When the tests ran no changed line, show prints `no changed code ran; the expectation or the environment changed (diff against main)`. That is a strong hint that the expectation itself is stale, or that the failure comes from data, time, or the platform.
 - **No trace.** `xpt show` says `no trace of these tests; run them with pytest --xpt-trace to see the changed code they ran`. `xpt accept` prints nothing for a group without a trace, so an untraced accept reads as before. `--json` always carries `changed_code`, with `status` `no_trace`.
-- **Reuse.** `xpt coverage` (see Coverage in the diff) uses the same three parts: `trace.Tracer` for the lines, `changes.changes` for the diff, and `changes.function_at` for grouping by function.
+- **Reuse.** `xpt coverage` (see Coverage in the diff) and `xpt affected` (see Affected tests) use the same parts: `trace.Tracer` for the lines, `changes.changes` for the diff, and `changes.function_at` for grouping by function. `xpt affected` records every test's lines.
 
 Open questions, resolved:
 
@@ -384,6 +393,25 @@ src/app/load.py read_rows: 2 of 9 changed lines not run
 - **Branches.** Not reported yet. Never-taken branches need the possible arcs of each changed line, which coverage.py computes from its own analysis of the syntax tree. From xpt's tracer they could come from `sys.monitoring` `BRANCH` events on 3.12 and 3.13 and `BRANCH_LEFT` and `BRANCH_RIGHT` on 3.14, with the possible branches read from the bytecode of the changed code objects, and not at all on 3.11. That is a follow-up. A branch that was never taken often leaves a line of its body not run, which this already reports.
 - **Subprocesses.** Lines run by processes the tests start, other than pytest, are not traced.
 
+### Affected tests
+
+The biggest repeated cost in an agent's loop is running the test suite. It runs everything after each edit, or guesses a subset and misses a regression. `xpt affected` lists the tests that ran the changed code, each with its reason, and `xpt affected -- pytest` runs only those (#70).
+
+Decision: build it inside xpt, with the standard library only. pytest-testmon does the same job with coverage.py and SQLite, and reruns tests inside pytest (see `docs/research.md`). xpt already has the tracer and the diff from Changed code, so the map costs one more option and a module, with no dependency. What it adds over testmon is a diff against any git ref rather than the last run, a reason for every test, a selection that can be printed or read as JSON before anything runs, and a fallback to every test, with a reason, whenever the map can't be trusted. What it leaves to testmon is updating the map on every run, tracking installed packages, and tracing subprocesses.
+
+- **The map.** `pytest --xpt-map` keeps every test's lines from `trace.Tracer`, not only those of failing tests. At session end each process, controller or xdist worker, writes `.xpt/map/<run>/<worker>.json`, as for observations, and the controller, which ends after its workers, joins them into `.xpt/map.json` with `os.replace` and deletes the parts. One map per project, replaced whole, because the question is about the code now, not about a run. It holds `HEAD`, the sha256 of each file the run imported or ran, with `\r\n` read as `\n` so a checkout that converts line endings matches the commit, and each test's lines. A session that ends with exit code 0 or 1 replaces the map; an interrupted or broken one keeps the old map. The map should come from a full run: a test it doesn't hold is selected only when its file is new or changed.
+- **The diff.** The map's line numbers belong to the files it hashed, so a changed file is read through the old side of the diff, and `Hunk.old_start` carries it. The default base is the map's commit. A file that matches its hash is unchanged since the map, and its hunks, if any, are already in the map. A file that doesn't match must be in the diff, and its content at the base must match the hash, read with `git cat-file`. Otherwise the map is stale, `map is stale: N files changed since it was built that the diff against REF doesn't show (...)`, and every test runs.
+- **Functions.** A hunk's lines of code, removed ones placed in the base's syntax tree and added ones in the working tree's, each sit in the body of an innermost function. A test is selected when it ran a line of that function's body in the base, which is pytest-testmon's granularity: an edit to a branch no test took still selects the tests that called the function. Blank lines and comments never select anything.
+- **Import-time effects.** A line of code outside every function body runs when the module or class is defined: a constant, an import, a signature, a default, a decorator, a class attribute. The tracer sees those lines once, at import, mostly before any test, so they can't be attributed to a test. Such a change selects every test that ran a line of the file. A file the map run imported but no test ran a line of, such as a module of constants, can still be read by a test, so a change there runs every test. A module imported before tracing starts, by a root `conftest.py` or a plugin, isn't in the map at all, and a change to it selects nothing.
+- **Test files.** A changed test file, one that holds a node id in the map, is selected whole, so tests added to it run. A new or untracked file named `test_*.py` or `*_test.py` is always selected. A deleted file selects the tests that ran it, and a test whose file was deleted is dropped.
+- **Everything.** `conftest.py`, `pyproject.toml`, `setup.cfg`, `pytest.ini`, `tox.ini`, or any changed file that is not Python can change any test, so every test runs. So do no map, a stale map, and no git. Files under hidden directories, `__pycache__`, and virtual environments don't count, the same rule as the project's own files.
+- **Running.** `xpt affected -- COMMAND` appends the selection to the command and exits with its code. `pytest` becomes `sys.executable -m pytest`, so it runs in xpt's environment. With nothing selected it runs nothing and exits `0`, because an empty pytest run exits `5` and would read as a failure; `--all-if-empty` runs everything instead.
+
+Open questions, resolved:
+
+- **What does xpt add beyond testmon?** See the decision above and the pytest-testmon entry in `docs/research.md`.
+- **How are import-time effects attributed?** By file, not by test, as above. testmon does the same: its `<module>` block holds everything outside function bodies, and any test that ran a line of the file includes it.
+
 ## Persistence
 
 ```
@@ -392,6 +420,8 @@ src/app/load.py read_rows: 2 of 9 changed lines not run
   runs/<run>/<worker>.jsonl
   runs/<run>/source     # the project source digest, written by the pytest controller
   runs/<run>/<worker>.trace.json  # with --xpt-trace, the lines each failing test ran
+  map.json              # with --xpt-map, the lines every test ran (see Affected tests)
+  map/<run>/<worker>.json  # each process's part of the map until the controller joins them
   latest                # the run id of the newest complete run
   probes/<id>.jsonl     # the hits of one xpt probe (see Probing a line)
   decisions.jsonl       # reject decisions, one per line (see Rejection)
@@ -773,7 +803,7 @@ Recorded values may also use helpers reached through `expect`, so a file that im
 
 `expect.output(capsys)` expects captured stdout and stderr, or a `CompletedProcess`, as lists of lines (see Expecting output).
 
-pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, `--xpt-json PATH`, `--xpt-deterministic`, and `--xpt-trace`. The plugin's fixture is `xpt_deterministic` (see Deterministic tests). unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, `--xpt-json PATH`, `--xpt-deterministic`, `--xpt-trace`, and `--xpt-map`. The plugin's fixture is `xpt_deterministic` (see Deterministic tests). unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 
@@ -787,6 +817,7 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **Setup and migration.** `xpt init` and `xpt convert` are done.
 - **Tracebacks outside pytest.** `xpt run` and `xpt.traceback.install()` are done.
+- **Affected tests.** `pytest --xpt-map` and `xpt affected` are done.
 - **MCP server.** `xpt mcp` and `xpt init --mcp` are done. Comparing it with the CLI in the agent benchmark is part of M5.
 - **Environment report.** `xpt env` and `xpt env NAME` are done. A shadowing line in the pytest report when a test module fails to import is next.
 - **Installed API listing.** `xpt api` is done.

@@ -337,6 +337,28 @@ A skip's `line` is `null` when the whole file was skipped.
 - `function` is the qualified name of the innermost function or class, null at module level.
 - `stale` lists changed files edited after coverage.py's data file was written, and `unmeasured` changed files that data does not cover. Both are left out of `functions` and are empty without `--from-coverage`.
 
+## Affected
+
+`xpt affected --json` prints the selection. See [`xpt affected`](cli.md#xpt-affected----command-arg-).
+
+```json
+{
+  "schema_version": 1,
+  "command": "affected",
+  "since": "1a2b3c4d5e6f, the map's commit",
+  "all": false,
+  "reason": null,
+  "tests": [
+    {"id": "tests/test_price.py::test_total", "reason": "ran src/shop/price.py:apply_discount, which changed"},
+    {"id": "tests/test_tax.py", "reason": "new test file"}
+  ]
+}
+```
+
+- `all` is true when every test has to run, and `reason` says why, as `no map of the tests; build it with pytest --xpt-map`. `tests` is then empty.
+- `since` is the ref diffed against, null when there was no diff.
+- Each `id` is a pytest node id or a whole test file, and can be passed to pytest as it is. `tests` is empty when no test ran the changed code.
+
 ## Runs
 
 ```json

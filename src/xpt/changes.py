@@ -15,8 +15,9 @@ from pathlib import Path
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 DEFAULT_BRANCHES = ("main", "master", "origin/main", "origin/master")
 TIMEOUT = 30
+_NO_FILE = "no such file"
 
-_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
 class GitError(Exception):
@@ -34,6 +35,9 @@ class Hunk:
     count: int
     removed: tuple[str, ...]
     added: tuple[str, ...]
+    old_start: int = 0
+    """The first removed line in the base, or for a hunk that only adds lines the base's line
+    before the addition."""
 
     @property
     def lines(self) -> range:
@@ -108,6 +112,12 @@ def _base(root: Path, since: str | None) -> tuple[str, str]:
     return "HEAD", "HEAD"
 
 
+def head(root: Path) -> str | None:
+    """The commit `HEAD` names, None without git, a repository, or a commit."""
+    found = _try(root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+    return found.strip() or None if found else None
+
+
 def _default_branches(root: Path) -> list[str]:
     found = []
     head = _try(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
@@ -127,6 +137,10 @@ def _try(root: Path, *args: str) -> str | None:
 
 
 def _git(root: Path, *args: str, reason: str) -> str:
+    return _run(root, *args, reason=reason).decode("utf-8", "replace")
+
+
+def _run(root: Path, *args: str, reason: str) -> bytes:
     env = os.environ | {"GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
     try:
         done = subprocess.run(
@@ -144,19 +158,19 @@ def _git(root: Path, *args: str, reason: str) -> str:
     if done.returncode != 0:
         message = done.stderr.decode("utf-8", "replace").strip().splitlines()
         raise GitError(reason or (message[-1] if message else f"git {args[0]} failed"))
-    return done.stdout.decode("utf-8", "replace")
+    return done.stdout
 
 
 def parse(diff: str) -> list[Hunk]:
     """The hunks of a `git diff --unified=0 --no-prefix` output."""
     hunks: list[Hunk] = []
     path: str | None = None
-    current: tuple[int, int, list[str], list[str]] | None = None
+    current: tuple[int, int, int, list[str], list[str]] | None = None
 
     def close() -> None:
         if current is not None and path is not None:
-            start, count, removed, added = current
-            hunks.append(Hunk(path, start, count, tuple(removed), tuple(added)))
+            old, start, count, removed, added = current
+            hunks.append(Hunk(path, start, count, tuple(removed), tuple(added), old))
 
     for line in diff.splitlines():
         if line.startswith("+++ "):
@@ -166,17 +180,51 @@ def parse(diff: str) -> list[Hunk]:
             path = None if name == "/dev/null" else name
         elif match := _HUNK.match(line):
             close()
-            count = 1 if match[2] is None else int(match[2])
-            current = (int(match[1]), count, [], [])
+            count = 1 if match[3] is None else int(match[3])
+            current = (int(match[1]), int(match[2]), count, [], [])
         elif current is not None and line.startswith("-"):
-            current[2].append(line[1:])
-        elif current is not None and line.startswith("+"):
             current[3].append(line[1:])
+        elif current is not None and line.startswith("+"):
+            current[4].append(line[1:])
         elif line.startswith("diff --git"):
             close()
             current = path = None
     close()
     return hunks
+
+
+def paths(root: Path, since: str) -> list[str]:
+    """Every file under `root` that differs from `since`, of any type: changed, added, deleted,
+    or untracked. Renames count as a deletion and an addition. Raises GitError."""
+    if since.startswith("-"):
+        raise GitError(f"{since!r} is not a git ref.")
+    _git(root, "rev-parse", "--show-toplevel", reason="not a git repository")
+    base, label = _base(root, since)
+    changed = _git(
+        root,
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "--relative",
+        "-z",
+        base,
+        reason=f"git diff {label} failed",
+    )
+    untracked = _git(root, "ls-files", "--others", "--exclude-standard", "-z", reason="")
+    return sorted({p for p in (changed + untracked).split("\0") if p})
+
+
+def blob(root: Path, since: str, path: str) -> bytes | None:
+    """The bytes of `path`, relative to `root`, at the commit `since`, None when it has no such
+    file. Raises GitError when git can't run."""
+    try:
+        return _run(root, "cat-file", "blob", f"{since}:./{path}", reason=_NO_FILE)
+    except GitError as error:
+        if str(error) != _NO_FILE:
+            raise
+        return None
 
 
 def _untracked(root: Path, paths: Sequence[str]) -> list[Hunk]:

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from xpt import decisions, flaky, frames, record, report, trace, uncovered
+from xpt import affected, changes, decisions, flaky, frames, record, report, trace, uncovered
 from xpt.accept import Accepted, after_session
 from xpt.deterministic import Pinned, deterministic
 from xpt.diff import diff
@@ -29,6 +29,7 @@ _COVERAGE = pytest.StashKey[Path]()
 _SESSION: list[trace.Tracer] = []
 """The tracer `xpt coverage` started in this process, so a pytest run inside it, such as an
 inline pytester run, does not start a second one."""
+_MAPPED = pytest.StashKey[dict[str, trace.Lines]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -56,6 +57,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         help="Record the project lines each failing test ran, so xpt show and xpt accept can "
         "print the changed code it ran.",
+    )
+    group.addoption(
+        "--xpt-map",
+        action="store_true",
+        help="Record the project lines every test ran into .xpt/map.json, so xpt affected can "
+        "select the tests that ran changed code. Build it from a full run.",
     )
     group.addoption(
         "--xpt-report",
@@ -106,8 +113,10 @@ def pytest_configure(config: pytest.Config) -> None:
     record.recorder.configure(
         config.rootpath, run, worker, record=not config.getoption("expect_no_record")
     )
-    if config.getoption("xpt_trace"):
+    if config.getoption("xpt_trace") or config.getoption("xpt_map"):
         _start_trace(config)
+    if config.getoption("xpt_map"):
+        config.stash[_MAPPED] = {}
     mode = _mode(config)
     config.stash[_MODE] = mode
     config.stash[_COMPARED] = None
@@ -128,14 +137,17 @@ def _start_trace(config: pytest.Config) -> None:
     try:
         tracer.start()
     except trace.TraceError as error:
-        raise pytest.UsageError(f"--xpt-trace can't start: {error}") from None
+        flag = "--xpt-trace" if config.getoption("xpt_trace") else "--xpt-map"
+        raise pytest.UsageError(f"{flag} can't start: {error}") from None
     config.stash[_TRACER] = tracer
     config.add_cleanup(tracer.stop)
 
 
-def _finish_trace(config: pytest.Config) -> None:
-    """Stop tracing, store the lines of each test that recorded an observation, and under
-    `xpt coverage` every line the session ran."""
+def _finish_trace(config: pytest.Config, exitstatus: int) -> None:
+    """Stop tracing, store the lines of each test that recorded an observation, under
+    `xpt coverage` every line the session ran, and with --xpt-map every test's lines. The
+    controller joins every process's map once its workers are done, and keeps it only when
+    the session ran to the end."""
     tracer = config.stash.get(_TRACER, None)
     if tracer is None:
         return
@@ -147,6 +159,14 @@ def _finish_trace(config: pytest.Config) -> None:
     directory = config.stash.get(_COVERAGE, None)
     if directory is not None:
         uncovered.write(directory, config.rootpath, tracer.everything(), tracer.imported())
+    mapped = config.stash.get(_MAPPED, None)
+    if mapped is None:
+        return
+    root = config.rootpath
+    affected.write_part(root, rec.run, rec.worker, mapped, tracer.definitions())
+    if not hasattr(config, "workerinput"):
+        complete = exitstatus in (pytest.ExitCode.OK, pytest.ExitCode.TESTS_FAILED)
+        affected.merge(root, rec.run, changes.head(root), keep=complete)
 
 
 def _groups(root: Path, run: str) -> tuple[Group, ...]:
@@ -213,9 +233,12 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
         record.recorder.test = None
         if tracer is not None:
             recorded = test in record.recorder.tests
-            lines = tracer.end(keep=recorded)
+            mapped = item.config.stash.get(_MAPPED, None)
+            lines = tracer.end(keep=recorded or mapped is not None)
             if recorded:
                 item.config.stash[_TRACED][test] = lines
+            if mapped is not None:
+                mapped[test] = lines
 
 
 @pytest.fixture
@@ -316,9 +339,9 @@ def _detail(
     return Raised(frames.name(error), frames.message(error))
 
 
-def pytest_sessionfinish(session: pytest.Session) -> None:
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
-    _finish_trace(config)
+    _finish_trace(config, exitstatus)
     if hasattr(config, "workerinput"):
         return
     record.recorder.finish(source=True)

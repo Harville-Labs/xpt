@@ -183,6 +183,60 @@ A skip's `line` is `null` when the whole file was skipped.
 - `spread` is the largest difference between the values for a `float`, and null otherwise.
 - `suggestion` is the `expect()` keyword that would keep the path stable, or null when none can, as for a path that is not a dict entry.
 
+## Env
+
+`xpt env --json` returns the interpreter and every problem, each section a list that is empty when nothing is wrong.
+
+```json
+{
+  "schema_version": 1,
+  "command": "env",
+  "interpreter": {
+    "version": "3.12.7",
+    "executable": ".venv/bin/python",
+    "venv": ".venv",
+    "lockfiles": ["uv.lock"],
+    "matches_lock": false,
+    "problems": []
+  },
+  "shadowing": [
+    {"path": "json.py", "module": "json", "stdlib": true, "distributions": []}
+  ],
+  "drift": [
+    {"name": "requests", "lockfile": "uv.lock", "locked": ["2.32.3"], "installed": "2.31.0"},
+    {"name": "idna", "lockfile": "uv.lock", "locked": ["3.7"], "installed": null}
+  ],
+  "unreadable": []
+}
+```
+
+- `venv` is null outside a virtual environment. `matches_lock` is null when there is no lockfile.
+- `interpreter.problems` holds the `interpreter:` lines' text, and `unreadable` the `lockfile:` lines'.
+- `distributions` names the installed distributions a shadowing module hides, and is empty for a standard library module.
+- `locked` has more than one version when the lock pins a package differently per platform. `installed` is null for a missing package.
+
+`xpt env NAME --json` returns the interpreter without the lock fields and the module:
+
+```json
+{
+  "schema_version": 1,
+  "command": "env",
+  "interpreter": {"version": "3.12.7", "executable": ".venv/bin/python", "venv": ".venv", "problems": []},
+  "module": {
+    "name": "requests",
+    "kind": "file",
+    "origin": ".venv/lib/python3.12/site-packages/requests/__init__.py",
+    "locations": [],
+    "stdlib": false,
+    "distribution": "requests",
+    "version": "2.32.3",
+    "shadows": null
+  }
+}
+```
+
+`kind` is `file`, `namespace` (with `locations` and no `origin`), `built-in`, `frozen`, or `missing`. `shadows` names what a project file hides, as in `the standard library module json`, and is null otherwise.
+
 ## Runs
 
 ```json

@@ -39,6 +39,7 @@ def rerun(root: Path, tests: tuple[str, ...]) -> Rerun:
     done = subprocess.run(
         [sys.executable, "-m", "pytest", *tests],
         cwd=root,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         encoding="utf-8",

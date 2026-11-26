@@ -4,7 +4,7 @@ xpt is built for agents that run tests, read the output, and change code. Three 
 
 - **The report is short.** One block per failure with the diff by path, and a footer that names the next command. An agent spends its tokens on what changed.
 - **Accepting is explicit.** A run never writes to the source. `xpt accept` writes only the call sites it is given, refuses when the expected argument changed since the run, and `xpt reject` stops a bug from being offered again.
-- **Everything has JSON.** Every command takes `--json`, and `pytest --xpt-json=PATH` writes the full report.
+- **Everything has JSON.** Every command takes `--json`, and `pytest --xpt-json=PATH` writes the full report. `xpt mcp` serves the review commands as [MCP tools](mcp.md) that return the same objects.
 
 The risk with any snapshot tool is an agent that accepts a wrong value to make a test pass. xpt can't decide whether a value is right. It makes the decision visible: every diff is on screen before the footer suggests an accept, and a rejected value stays rejected. Accept also refuses values that look like failures, such as an exception repr, `None` where there was data, a list that became empty, or a new `nan`, unless you pass `--force`.
 

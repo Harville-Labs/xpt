@@ -339,6 +339,20 @@ SQLite would buy queries we do not need. It would also make concurrent writers o
 - **`convert` is conservative.** It uses only `ast` and byte offsets, the same splice approach as accept. Each edit is checked by parsing `expect(a, b)` from the new text and comparing its arguments' AST with the original operands, and the whole file must compile afterward. Anything that could change meaning is skipped with a reason, not guessed at. Float literals are skipped because `==` is exact on floats while a converted test invites `atol=`; the person converting decides.
 - **`convert` takes no lock.** It writes only test files given on the command line, never `.xpt/`, so it does not create `.xpt/` as a side effect.
 
+## MCP server
+
+`xpt mcp` serves the review commands as MCP tools over stdio, so clients such as Claude Code and Codex list them with schemas and call them without reading `--help` (#69).
+
+Decision: build it inside xpt, with the standard library only. MCP over stdio is JSON-RPC 2.0 with one message per line, which `json` and a read loop serve in about three hundred lines. An MCP SDK would break the no-runtime-dependencies rule, and a separate `xpt-mcp` package would be a second release for a few hundred lines. The benchmark comparison against the CLI that #69 asked for before shipping is not done: it needs paid agent runs, and is left to M5.
+
+- **One schema.** Each tool calls the CLI command's handler in `xpt.cli` with a namespace built from the tool's arguments, and returns the object that command's `--json` prints, `schema_version` and `command` included. The tool result holds that object as JSON text in one `text` content item and, from protocol `2025-06-18` on, as `structuredContent` too. Nothing shells out.
+- **Tools.** `xpt_failures(run?)`, `xpt_show(id, run?, full?)`, `xpt_accept(ids?, all?, missing?, dry_run?, force?, verify?, run?)`, `xpt_reject(ids, run?)`, `xpt_runs()`, and `xpt_flaky()`. `clean`, `init`, `convert`, and `run` are not tools: they set a project up or delete its state, which is a person's decision, not a step in the review loop. Each tool's `inputSchema` is a JSON Schema object with `additionalProperties: false`, and annotations mark the read tools `readOnlyHint`.
+- **Errors.** A tool error, such as a bad argument, an unknown id, no recorded run, or a held lock, is a result with `isError: true` and the one-line message the CLI prints on stderr, so the model can read it and correct the call. An exit code of `1`, such as failures found or an accept that left a group stale, is not an error: the object says what happened. Protocol errors are JSON-RPC errors: `-32700` for a line that is not JSON, `-32600` for a message that is not a request, `-32601` for an unknown method, `-32602` for an unknown tool or params that are not an object, and `-32603` for a bug, whose traceback goes to stderr.
+- **Versions.** The server knows `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`. A client that asks for one of them gets it back, and any other gets `2025-11-25`, the newest, as the spec says a server should answer a version it does not support. The server implements `initialize`, `notifications/initialized`, `ping`, `tools/list`, and `tools/call`, and advertises only the `tools` capability, with `listChanged: false`. Other notifications are ignored. Batches, which `2025-06-18` removed, are answered `-32600`.
+- **stdout is the protocol.** Only responses are written to stdout. A startup line goes to stderr, and anything printed during a tool call is redirected to stderr. `accept --verify` already captures pytest's output, and its child gets an empty stdin so it cannot read the protocol stream.
+- **Accept keeps its guards.** `xpt_accept` refuses stale, suspect, and flaky values exactly as `xpt accept` does, and needs ids, `all`, or `missing`. It asks for no extra confirmation. A tool call is easier to make than a command, but MCP clients can already ask the person before a tool call, Claude Code does by default, and the annotations mark accept as not read-only. A second prompt inside xpt would only teach people to click through it. The tool's description says to read each diff before accepting and to pass `force` only for a value that is really intended.
+- **`xpt init --mcp`** adds `{"mcpServers": {"xpt": {"command": "xpt", "args": ["mcp"]}}}` to `.mcp.json`, keeping every other key and server. An `xpt` entry that differs, such as one that runs `uvx xpt mcp`, is kept and reported, never replaced. A `.mcp.json` that is not a JSON object with an object under `mcpServers` is an error, and neither file is written. The merged file is rewritten with two-space indentation.
+
 ## Serialization, comparison, and source generation
 
 These are separate functions over the `Value` tree:
@@ -484,7 +498,7 @@ a81f  tests/test_parser.py:14  mismatch  2 tests
 
 There is no color and no banner. `--json` prints one JSON object on stdout with `"schema_version": 1` and `"command"`. Values use the recorded JSON form, and `expected` is left out when there is none, so a recorded `None` stays distinct. A mismatch adds `changes` (path, op, expected, actual) and `unchanged`. Accept adds `outcomes` and `changed`. Reject adds `outcomes`. Each group carries `rejected` and `flaky`.
 
-The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `reject`, `load_rejections`, `mark`, `diff`, and their data types, so an MCP server later is another thin wrapper and not a redesign.
+The CLI handlers are thin wrappers over `xpt.api`, which re-exports `load_run`, `group`, `accept`, `reject`, `load_rejections`, `mark`, `diff`, and their data types. `xpt mcp` (see MCP server) calls the CLI handlers themselves, so its tools return the same objects.
 
 ### How the report fits into pytest
 
@@ -575,4 +589,5 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **Setup and migration.** `xpt init` and `xpt convert` are done.
 - **Tracebacks outside pytest.** `xpt run` and `xpt.traceback.install()` are done.
+- **MCP server.** `xpt mcp` and `xpt init --mcp` are done. Comparing it with the CLI in the agent benchmark is part of M5.
 - **M6. Release.** Name check, docs, PyPI.

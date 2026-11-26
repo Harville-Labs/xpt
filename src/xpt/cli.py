@@ -179,7 +179,7 @@ def clean(args: argparse.Namespace, root: Path) -> Output:
 
 
 def init_command(args: argparse.Namespace, root: Path) -> Output:
-    result = init.init(root, init.probe(), os.environ, dry_run=args.dry_run)
+    result = init.init(root, init.probe(), os.environ, dry_run=args.dry_run, mcp=args.mcp)
     return Output(
         0 if all(c.ok for c in result.checks) else 1,
         init.lines(result, args.dry_run),
@@ -243,6 +243,7 @@ def _parser() -> argparse.ArgumentParser:
     add("clean", clean, "delete .xpt/ and every recorded value")
     sub = add("init", init_command, "add xpt's agent instructions to AGENTS.md and check pytest")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
+    sub.add_argument("--mcp", action="store_true", help="also add xpt mcp to .mcp.json")
     sub = add("convert", convert_command, "rewrite assert x == literal as expect(x, literal)")
     sub.add_argument("paths", nargs="+", type=Path, metavar="path")
     sub.add_argument("--dry-run", action="store_true", help="report and write nothing")
@@ -259,6 +260,8 @@ def _parser() -> argparse.ArgumentParser:
         help="raise the limits; -vv prints Python's full traceback",
     )
     sub.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
+    sub = commands.add_parser("mcp", help="serve the review commands as MCP tools over stdio")
+    sub.add_argument("--root", type=Path, default=Path(), help="the project root (default: .)")
     return parser
 
 
@@ -277,6 +280,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = _parser().parse_args(argv)
         if args.command == "run":
             return _run(args.argv, args.verbose)
+        if args.command == "mcp":
+            from xpt import mcp
+
+            return mcp.main(args.root)
         output: Output = args.handler(args, args.root)
     except (UsageError, RecordError, AcceptError, convert.ConvertError, init.InitError) as error:
         print(f"xpt: error: {error}", file=sys.stderr)

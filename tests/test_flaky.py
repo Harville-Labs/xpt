@@ -22,6 +22,13 @@ def found(*values: object) -> list[tuple[str, str, str | None]]:
             [('value["at"]', "timestamp", """ignore=['value["at"]']""")],
         ),
         (
+            (
+                {"id": "5f0c2a7e-3b41-4d6a-9a8e-0c1d2e3f4a5b"},
+                {"id": "c8b1e2d3-4f5a-4b6c-8d7e-9f0a1b2c3d4e"},
+            ),
+            [('value["id"]', "uuid", """ignore=['value["id"]']""")],
+        ),
+        (
             ({"id": "a1f"}, {"id": "9c2"}),
             [('value["id"]', "value", """ignore=['value["id"]']""")],
         ),
@@ -65,6 +72,23 @@ def test_a_value_that_cannot_be_ignored_says_to_make_it_deterministic():
     assert v.reason == (
         "value had 2 values in 2 runs with no source change. "
         "Make it deterministic in the test, because ignore= removes only dict entries."
+    )
+
+
+def test_a_timestamp_or_uuid_suggests_the_deterministic_fixture():
+    [uuid] = paths([serialize({"id": "0" * 32}), serialize({"id": "1" * 32})], RUNS[:2])
+    assert uuid.reason == (
+        'value["id"] looks like a UUID and had 2 values in 2 runs with no source change. '
+        """Consider ignore=['value["id"]'] or the xpt_deterministic fixture."""
+    )
+    [at] = paths([serialize("2026-01-01T00:00"), serialize("2026-01-02T00:00")], RUNS[:2])
+    assert at.reason == (
+        "value looks like a timestamp and had 2 values in 2 runs with no source change. "
+        "Pin it with the xpt_deterministic fixture, because ignore= removes only dict entries."
+    )
+    assert accept_reason([uuid]).endswith(
+        """Consider ignore=['value["id"]'], the xpt_deterministic fixture, """
+        "or accept it with --force if it is right."
     )
 
 
@@ -112,7 +136,8 @@ def test_steady():
 
 TIMESTAMP = (
     'flaky: value["created_at"] looks like a timestamp and had 2 values in 2 runs '
-    """with no source change. Consider ignore=['value["created_at"]']."""
+    """with no source change. Consider ignore=['value["created_at"]'] """
+    "or the xpt_deterministic fixture."
 )
 TAGS = (
     'flaky: value["tags"] had its items in 2 orders in 2 runs with no source change. '
@@ -229,7 +254,7 @@ def test_accept_refuses_a_flaky_value_and_writes_nothing(
         f"{id}  test_it.py:13  suspect",
         '  value["created_at"], value["tags"] changed between 2 runs with no source change '
         """(rule: flaky). Consider ignore=['value["created_at"]'], unordered=True, """
-        "or accept it with --force if it is right.",
+        "the xpt_deterministic fixture, or accept it with --force if it is right.",
         "No files changed (1 suspect). "
         f"Next: make the tests deterministic, or run xpt accept --force {id}.",
     ]

@@ -149,7 +149,7 @@ A skip's `line` is `null` when the whole file was skipped.
 ```
 
 - `run` is the newest run that recorded the call site, and the one its paths are judged in.
-- `kind` is `timestamp`, `value`, `order`, or `float`. `values` counts the distinct values at the path. `runs` are the runs compared, which share the expected argument and the project source.
+- `kind` is `timestamp`, `uuid`, `value`, `order`, or `float`. `values` counts the distinct values at the path. `runs` are the runs compared, which share the expected argument and the project source.
 - `spread` is the largest difference between the values for a `float`, and null otherwise.
 - `suggestion` is the `expect()` keyword that would keep the path stable, or null when none can, as for a path that is not a dict entry.
 

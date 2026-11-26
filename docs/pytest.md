@@ -54,6 +54,50 @@ The `accept:` line accepts one call site, the one whose diff is right above it. 
 | `--expect-no-record` | `XPT_NO_RECORD=1` | Don't record failing `expect` calls under `.xpt/`. |
 | `--xpt-report=pytest` | `XPT_REPORT=pytest` | Keep pytest's own output. The default is `xpt`. |
 | `--xpt-json=PATH` | | Also write the full report, with no limits, as [JSON](json.md#pytest-xpt-json). |
+| `--xpt-deterministic` | | Pin the clock, `random`, and `uuid` for every test, as the `xpt_deterministic` fixture does. See [Deterministic tests](#deterministic-tests). |
+
+## Deterministic tests
+
+A value that holds the current time, a fresh UUID, or a random choice changes on every run, so its expectation can never pass. The `xpt_deterministic` fixture pins those sources for one test, so the value is the same on every run and can be expected directly:
+
+```python
+def test_create(xpt_deterministic):
+    order = create_order()
+    expect(
+        order, {"id": "00000000-0000-4000-8000-000000000001", "created_at": "2000-01-01T00:00:00"}
+    )
+
+
+def test_expiry(xpt_deterministic):
+    token = issue_token()
+    xpt_deterministic.advance(3600)
+    expect(token.expired(), True)
+```
+
+While the test runs:
+
+- `time.time()`, `time.time_ns()`, `datetime.datetime.now()`, `utcnow()`, `today()`, and `datetime.date.today()` read 2000-01-01 00:00:00 UTC. The clock moves only when the test calls `xpt_deterministic.advance(seconds)`, with a number or a `timedelta`. Naive results are in UTC, so the test reads the same in every time zone, and `now(tz)` converts to `tz`.
+- `uuid.uuid4()` returns `00000000-0000-4000-8000-000000000001`, then `...0002`, and so on. `uuid.uuid1()` counts the same way from `00000000-0000-1000-8000-000000000001`. Both are valid UUIDs of their version.
+- `random` is seeded from the test's node id, so each test has its own fixed sequence, and two tests don't share one.
+
+`--xpt-deterministic` applies the fixture to every test. Both work under xdist, because the seed comes from the node id and not from the worker. Everything is put back when the test ends, also when it fails.
+
+A module in your project that imported a name directly, as in `from datetime import datetime` or `from uuid import uuid4`, is pinned too. Installed packages and the standard library keep what they imported, and so does C code: a library that did `from time import time` reads the real clock. `time.monotonic()`, `time.perf_counter()`, `time.sleep()`, `time.localtime()`, `os.urandom()`, `secrets`, and `random.SystemRandom` are not pinned, so timeouts and durations still work. The patch is process-wide, so other threads see the pinned clock too.
+
+xpt doesn't record `datetime` or `UUID` objects yet, so expect `value.isoformat()` or `str(value)`, as above.
+
+The flaky report names the fixture when a path that changed between runs looks like a timestamp or a UUID.
+
+Outside pytest, use the context manager. In `unittest`:
+
+```python
+from xpt.deterministic import deterministic
+
+
+class TestOrder(unittest.TestCase):
+    def setUp(self):
+        self.clock = self.enterContext(deterministic(self.id()))
+```
 
 ## When pytest's report is kept
 

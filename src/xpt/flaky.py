@@ -25,10 +25,13 @@ from xpt.record import RecordError, load_run, run_ids, source_digest
 from xpt.site import CallSite, SiteKey
 from xpt.value import Bool, Dataclass, Dict, Float, Int, Null, Seq, Str, Value
 
-Kind = Literal["timestamp", "value", "order", "float"]
+Kind = Literal["timestamp", "uuid", "value", "order", "float"]
 
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}|$)|\d{2}:\d{2}:\d{2}")
+_UUID = re.compile(r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}", re.I)
 _NOT_IGNORABLE = "Make it deterministic in the test, because ignore= removes only dict entries."
+_FIXTURE = "the xpt_deterministic fixture"
+_PINNABLE: frozenset[Kind] = frozenset({"timestamp", "uuid"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,8 +60,9 @@ class Volatile:
     def reason(self) -> str:
         where, runs = format_path(self.path), f"{len(self.runs)} runs with no source change"
         match self.kind:
-            case "timestamp":
-                said = f"{where} looks like a timestamp and had {self.values} values in {runs}."
+            case "timestamp" | "uuid":
+                like = "a timestamp" if self.kind == "timestamp" else "a UUID"
+                said = f"{where} looks like {like} and had {self.values} values in {runs}."
             case "order":
                 said = f"{where} had its items in {self.values} orders in {runs}."
             case "float" if self.spread is not None:
@@ -66,8 +70,11 @@ class Volatile:
                 said = f"{where} had {self.values} values up to {apart} apart in {runs}."
             case _:
                 said = f"{where} had {self.values} values in {runs}."
+        pinnable = self.kind in _PINNABLE
         if suggestion := self.suggestion:
-            return f"{said} Consider {suggestion}."
+            return f"{said} Consider {suggestion}{f' or {_FIXTURE}' if pinnable else ''}."
+        if pinnable:
+            return f"{said} Pin it with {_FIXTURE}, because ignore= removes only dict entries."
         if self.kind == "float":
             return f"{said} Make it deterministic in the test."
         return f"{said} {_NOT_IGNORABLE}"
@@ -164,7 +171,9 @@ def paths(values: Sequence[Value], runs: tuple[str, ...]) -> tuple[Volatile, ...
 def suggest(found: Sequence[Volatile]) -> str:
     """One combined suggestion for every path, as expect() keywords, "" when none applies."""
     patterns = [
-        p for v in found if v.kind in ("timestamp", "value") and (p := ignore_pattern(v.path))
+        p
+        for v in found
+        if v.kind in ("timestamp", "uuid", "value") and (p := ignore_pattern(v.path))
     ]
     keywords = (
         [f"ignore=[{', '.join(quote(p) for p in dict.fromkeys(patterns))}]"] if patterns else []
@@ -182,8 +191,10 @@ def accept_reason(found: Sequence[Volatile]) -> str:
     where = ", ".join(format_path(v.path) for v in found)
     runs = max(len(v.runs) for v in found)
     said = f"{where} changed between {runs} runs with no source change (rule: flaky)."
-    suggestion = suggest(found)
-    fix = f"Consider {suggestion}" if suggestion else "Make the test deterministic"
+    fixes = [s] if (s := suggest(found)) else []
+    if any(v.kind in _PINNABLE for v in found):
+        fixes.append(_FIXTURE)
+    fix = f"Consider {', '.join(fixes)}" if fixes else "Make the test deterministic"
     return f"{said} {fix}, or accept it with --force if it is right."
 
 
@@ -237,6 +248,8 @@ def _differ(a: Value, b: Value, path: Path) -> Iterator[tuple[Path, Kind]]:
                     yield from _differ(v, other, field_path(path, name))
         case (Float() | Int(), Float() | Int()) if Float in (type(a), type(b)):
             yield path, "float"
+        case Str(x), Str(y) if _UUID.fullmatch(x) and _UUID.fullmatch(y):
+            yield path, "uuid"
         case Str(x), Str(y) if _TIMESTAMP.search(x) and _TIMESTAMP.search(y):
             yield path, "timestamp"
         case _:

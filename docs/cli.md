@@ -57,7 +57,7 @@ Accept also refuses, as `suspect` with the rule `flaky`, a value whose paths cha
 
 ```text
 7f3a  tests/test_order.py:7  suspect
-  value["created_at"], value["tags"] changed between 2 runs with no source change (rule: flaky). Consider ignore=['value["created_at"]'], unordered=True, or accept it with --force if it is right.
+  value["created_at"], value["tags"] changed between 2 runs with no source change (rule: flaky). Consider ignore=['value["created_at"]'], unordered=True, the xpt_deterministic fixture, or accept it with --force if it is right.
 ```
 
 Add the options to the test and run it again, or pass `--force` with the ids when the value is right.
@@ -76,7 +76,7 @@ List the call sites whose actual value changed between stored runs while the sou
 
 ```text
 7f3a  tests/test_order.py:7  flaky  2 runs
-  flaky: value["created_at"] looks like a timestamp and had 2 values in 2 runs with no source change. Consider ignore=['value["created_at"]'].
+  flaky: value["created_at"] looks like a timestamp and had 2 values in 2 runs with no source change. Consider ignore=['value["created_at"]'] or the xpt_deterministic fixture.
   flaky: value["tags"] had its items in 2 orders in 2 runs with no source change. Consider unordered=True.
 1 flaky call site in 2 stored runs. Next: add the suggested options to the tests, then run them again.
 ```
@@ -85,7 +85,8 @@ Two runs count when they recorded the call site with the same expected argument 
 
 | Kind | The values at the path | Suggestion |
 |---|---|---|
-| `timestamp` | Strings that look like a date or time. | `ignore=['value["created_at"]']` |
+| `timestamp` | Strings that look like a date or time. | `ignore=['value["created_at"]']`, or the [`xpt_deterministic`](pytest.md#deterministic-tests) fixture. |
+| `uuid` | Strings that look like a UUID. | `ignore=['value["id"]']`, or the `xpt_deterministic` fixture. |
 | `value` | Any other change, such as an id. | `ignore=` the path, with list indexes as `[...]`. A path that is not a dict entry can't be ignored, so make it deterministic in the test. |
 | `order` | A list with the same items in another order. | `unordered=True` |
 | `float` | Numbers that differ by a little. | `atol=` the spread, rounded up. |

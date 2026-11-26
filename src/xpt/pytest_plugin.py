@@ -9,6 +9,7 @@ import pytest
 
 from xpt import decisions, flaky, record, report
 from xpt.accept import Accepted, after_session
+from xpt.deterministic import Pinned, deterministic
 from xpt.diff import diff
 from xpt.expect import ExpectationFailed
 from xpt.failure import Compared, Detail, Expected, Frame, Raised, Text, Where, where_json
@@ -56,6 +57,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         metavar="PATH",
         default=None,
         help="Also write the untruncated xpt report to PATH as JSON.",
+    )
+    group.addoption(
+        "--xpt-deterministic",
+        action="store_true",
+        help="Pin the clock, random, and uuid for every test, as the xpt_deterministic "
+        "fixture does.",
     )
 
 
@@ -132,6 +139,24 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
         return (yield)
     finally:
         record.recorder.test = None
+
+
+@pytest.fixture
+def xpt_deterministic(request: pytest.FixtureRequest) -> Generator[Pinned, None, None]:
+    """Pin time, random, and uuid for this test. Call `.advance(seconds)` to move the clock.
+
+    The patches go through the test's `monkeypatch`, so they unwind in order with the test's
+    own patches whichever fixture comes first."""
+    monkeypatch = request.getfixturevalue("monkeypatch")
+    root = request.config.rootpath
+    with deterministic(request.node.nodeid, root=root, patcher=monkeypatch) as pinned:
+        yield pinned
+
+
+@pytest.fixture(autouse=True)
+def _xpt_deterministic_everywhere(request: pytest.FixtureRequest) -> None:
+    if request.config.getoption("xpt_deterministic"):
+        request.getfixturevalue("xpt_deterministic")
 
 
 @pytest.hookimpl(tryfirst=True)

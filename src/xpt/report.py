@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import difflib
+from collections.abc import Sequence
+
 from xpt.diff import ArrayCount, Change, Diff
 from xpt.options import PLAIN, Options
 from xpt.path import format_path
 from xpt.source import one_line
-from xpt.value import Value
+from xpt.value import Str, Value
 
 MAX_CHANGES = 10
 MAX_CHARS = 80
@@ -35,12 +38,39 @@ def changes(
     """
     shown = result.changes if limit is None else result.changes[:limit]
     hidden = len(result.changes) - len(shown)
-    change = _sides if labeled else _change
-    lines = [*map(_count, result.arrays), *(change(c, width) for c in shown)]
+    sides = ("left", "right") if labeled else ("expected", "actual")
+    lines = [*map(_count, result.arrays)]
+    for c in shown:
+        found = line_diff(c)
+        if found is None:
+            lines.append(_sides(c, width) if labeled else _change(c, width))
+        else:
+            lines.append(f"  {format_path(c.path)}: lines differ, - {sides[0]} + {sides[1]}")
+            body = head(found, None if limit is None else limit * 2)
+            lines += [f"    {cut(line, width)}" for line in body]
     if hidden:
         lines.append(f"  ... {hidden} more changes")
     lines.append(f"  {len(result.changes)} changed, {result.unchanged} unchanged")
     return lines
+
+
+def line_diff(c: Change) -> list[str] | None:
+    """A unified diff with one line of context when both sides are strings and one spans
+    lines, without the file headers. None for any other change."""
+    expected, actual = c.expected, c.actual
+    if not (isinstance(expected, Str) and isinstance(actual, Str)):
+        return None
+    if "\n" not in expected.v and "\n" not in actual.v:
+        return None
+    found = difflib.unified_diff(expected.v.splitlines(), actual.v.splitlines(), n=1, lineterm="")
+    lines = list(found)[2:]
+    return lines or None
+
+
+def head(lines: Sequence[str], limit: int | None) -> list[str]:
+    if limit is None or len(lines) <= limit:
+        return list(lines)
+    return [*lines[:limit], f"... {len(lines) - limit} more lines"]
 
 
 def _count(a: ArrayCount) -> str:

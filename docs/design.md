@@ -545,7 +545,7 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 
 - Each failure is one block. The header names the test and the deepest frame in a project file, outside `site-packages` and pytest. ` in <function>` follows when that frame is not the test function. When the error is raised in a helper, the header shows the chain of project frames from the test down instead, as `path:line > path:line function`, keeping the first frame and the three nearest the error. The test's own name is left out because the node id has it. The next line is the source line at the deepest frame, after `> `. Setup and teardown errors say `ERROR` and name the phase. Collection errors say `ERROR <path> (collect)` and keep pytest's `E` lines.
 - An `expect()` failure shows its short id, its status, the path diff, and a `flaky:` line for each path that changed between stored runs with the same source (see Flaky values). A group that is offered, recorded, and not written by this session ends with `accept: xpt accept <id>`. The footer already names every id, but an agent reading one block should not have to match ids against the footer to act on the diff it just read. The line and the footer's `Next:` come from the same set of pending groups, so they cannot disagree. Rejected, conflicting, and just-accepted groups get no line.
-- A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars, unsupported values, and other operators keep pytest's explanation.
+- A plain `assert left == right` on values xpt can serialize gets the same path diff, from `pytest_assertrepr_compare`, with each side labeled: `left 41, right 42`. It has no arrow, because `expected -> actual` would read backwards for `assert actual == expected`. Scalars other than multi-line strings, unsupported values, and other operators keep pytest's explanation.
 - Any other exception is one line, `Type: message`, cut to 200 characters. An exception raised from another, with `raise X from Y` or inside an `except` block, adds `caused by: Type: message`. `raise X from None` adds nothing.
 - Parametrized cases that fail at the same line with the same kind of error fold into the first case. Each other case gets an `also fails:` line with its full node id, which can be pasted into a pytest command, and the first detail line where it differs from the first case, without the shared exception type. The default limit of 10 applies, and the rest are counted.
 - A failing test prints the last 5 lines of its captured stdout, stderr, and log.
@@ -557,6 +557,18 @@ FAILED tests/test_math.py::test_double[0]  tests/test_math.py:22
 - `--xpt-json PATH` also writes the report as one JSON object with `"schema_version": 1`, `exit_code`, `summary`, `counts`, `duration`, `run`, `created`, `accepted`, and `failures`. `created` is null without `--expect-create`. With it, `created` holds `outcomes` and `changed` in the same form as `xpt accept --json`. `accepted` is the same for `--expect-accept`, plus `unknown`. A held `.xpt/accept.lock` skips every missing group with the lock's message instead of failing the session. Each failure has its test, phase, location, `callers`, `source`, `cause`, `detail`, captured `output`, and full `traceback`, with no limits. An expect failure adds its `group` in the same form as `xpt failures --json`, and a compared assert adds `changes` and `unchanged`. A compared assert's changes name their sides `left` and `right`, as the text does. `op` reads from left to right, so `add` is a value only the right side has.
 
 The expect limits are 10 changes per expectation and 80 characters per value, cut with a length marker. `xpt show --full` lifts both.
+
+A change whose sides are both strings, one of them spanning lines, prints as a unified line diff instead of two cut values: `-` lines are expected (or left), `+` lines actual (or right), with one line of context and the `@@` hunk headers that give line numbers. The file headers are left out. Each diff line is cut to the value width, and a diff shows at most twice the change limit in lines, so 20 by default and 100 with `-v`. This holds for a plain `assert` on two multi-line strings too, which pytest would otherwise explain with its own character diff. In `--json` and `--xpt-json`, such a change adds `lines` with the whole diff.
+
+```
+  value: lines differ, - expected + actual
+    @@ -3,3 +3,3 @@
+     | C | 0.82 |
+    -| D | 0.83 |
+    +| D | 0.93 |
+     | E | 0.84 |
+  1 changed, 0 unchanged
+```
 
 `xpt failures` prints the same block per group, a one-line footer with the counts, and the next command:
 

@@ -46,7 +46,7 @@ for outcome in result.outcomes:
 | Type | Fields |
 |---|---|
 | `Observation` | `run`, `test`, `site`, `status`, `expected`, `actual`, `detail` |
-| `Status` | `"missing"`, `"mismatch"`, `"unsupported"` |
+| `Status` | `"missing"`, `"mismatch"`, `"unsupported"`, `"returned"` |
 | `Group` | `id`, `site`, `status`, `actuals`, `expected`, `tests`, `detail`, `rejected`, and the properties `acceptable` and `offered` |
 | `GroupStatus` | `Status` plus `"conflict"` and `"unlocatable"` |
 | `CallSite` | `path`, `qualname`, `callee`, `ordinal`, `arg_sha`, `line` |

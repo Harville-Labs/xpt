@@ -10,6 +10,7 @@ expect(actual, expected, ignore=['value["id"]'])  # leave volatile dict entries 
 expect(actual, expected, unordered=True)  # lists compare as multisets
 expect(actual, {1: 2, 2: 4}, key=n)  # one expected value per parametrized case
 expect.output(capsys)  # captured stdout and stderr as lists of lines
+expect.raises(lambda: parse("x"))  # missing: fails and records what parse raised
 ```
 
 `expect` compares `actual` with `expected`. When they differ, or when `expected` is left out, the test fails with `ExpectationFailed` and xpt records the actual value under `.xpt/` so `xpt accept` can write it into the source.
@@ -27,6 +28,7 @@ Pass `expected` as the second positional argument or as `expected=`. When accept
 | Dataclasses | Must compare by value (`eq=True`, the default) and have every field in `__init__`. |
 | NumPy arrays and scalars, PyTorch tensors | Written as `np.array([...], dtype="float32")` or `torch.tensor([...], dtype=torch.float32)`. An array over 10,000 elements is written as a digest instead (see [Large arrays](#large-arrays)). Complex dtypes are written with `complex(...)` elements. A tensor on a device other than the CPU adds `device="mps:0"`. A NumPy scalar is recorded as the Python number it holds. |
 | pandas `Series` and `DataFrame` | Written as `pd.Series([...], dtype=..., name=..., index=[...])` and `pd.DataFrame({"col": [...]})`. A default index is left out. A named index, or one whose dtype pandas would not infer, is written as `pd.Index([...], dtype=..., name=...)`, and a multi-level one as `pd.MultiIndex.from_tuples([...], names=[...])`. Multi-level columns are tuple keys. A frame column whose dtype `pd.DataFrame` would not infer from its values is refused. |
+| Exceptions | Written as `ValueError("bad")`: the exact type and its `args`. One with `__notes__`, or one whose class can't be rebuilt by calling it with its `args`, is written as `expect.exception(ValueError, "bad", notes=["..."])`. See [Exceptions](#exceptions). |
 | Pydantic models, attrs classes, protobuf messages | Written as a constructor call with keyword arguments: Pydantic by field alias, plus extra fields; attrs by `__init__` alias; protobuf by the fields that are set. A protobuf message that sets extensions is wrapped as `expect.with_extensions(msg, extensions={"pkg.name": value})`. |
 
 Anything else fails with a message that names where the value is and its type:
@@ -134,6 +136,50 @@ expect() mismatch:
 The count needs the same shape on both sides. The largest difference is measured on numbers, so a bool or string array gets the count alone.
 
 A record over 1 MB keeps its status but drops both values. Expect a smaller part of the value instead.
+
+## Exceptions
+
+`expect.raises(fn)` calls `fn` with no arguments and records the exception it raises, so you don't have to guess its type or write a regex for its message:
+
+```python
+expect.raises(lambda: parse("x"))
+# after xpt accept:
+expect.raises(lambda: parse("x"), ValueError("invalid literal for int() with base 10: 'x'"))
+```
+
+Two exceptions are equal when they have the same type, the same `args`, and the same `__notes__`. The traceback, `__cause__`, `__context__`, and other attributes are not compared or recorded. The type must match exactly. Pass `subclass=True` to let a subclass of the expected type match. When a subclass differs in its args, xpt records it under the expected type, so accepting keeps the type you wrote.
+
+A failure names the part that differs, with `.args` as the path to the arguments:
+
+```text
+expect.raises() mismatch:
+  value.args[0]: "old" -> "new"
+  1 changed, 0 unchanged
+```
+
+`ignore=` takes paths the same way as for `expect()`, so it removes dict entries inside the arguments, such as `ignore=['value.args[0]["id"]']`. It can't remove an argument itself, because xpt must write every argument to rebuild the exception.
+
+When `fn` returns instead of raising, the call fails with what it returned, `expect.raises(): parse("3") returned 3 instead of raising.`, and the failure has status `returned`. It can't be accepted. Fix the code, or `expect()` the return value instead.
+
+`expect.raises` catches every `Exception` and `SystemExit`. `KeyboardInterrupt`, `GeneratorExit`, and other `BaseException` subclasses pass through, unless the expected value is one of them. A failed `expect()` inside `fn` always passes through, so it reports as itself.
+
+xpt writes an exception as a call to its class with its `args`. It first checks that calling the class with those `args` gives back the same `args`. A class whose `__init__` takes other arguments, such as `json.JSONDecodeError`, fails that check, and so does any exception with notes. Those are written through `expect.exception`, which builds the instance without calling `__init__`:
+
+```python
+expect.raises(
+    lambda: json.loads(""),
+    expect.exception(JSONDecodeError, "Expecting value: line 1 column 1 (char 0)"),
+)
+expect.raises(load, expect.exception(ValueError, "bad", notes=["while reading app.toml"]))
+```
+
+An `ExceptionGroup` is written with its children, as `ExceptionGroup("many", [ValueError("a"), TypeError("b")])`, because they are part of its `args`. Every argument must itself be a value xpt can record.
+
+The class is written by name under the same rules as a dataclass (see below), so a project exception needs an import in the test file. When the file has none, the accept is skipped and the reason names the import to add, such as `JSONDecodeError` from `json.decoder`.
+
+`expect(error, ValueError("bad"))` compares a caught exception the same way, and an exception inside a dict or list is recorded the same way.
+
+`expect.raises` has no context-manager form yet. Wrap code that isn't one call in a function.
 
 ## Writing a dataclass, model, or array
 

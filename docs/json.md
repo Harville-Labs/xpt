@@ -13,6 +13,7 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 | `{1: "x"}` | `{"dict": [[1, "x"]]}` |
 | `float("nan")` | `{"float": "nan"}` |
 | `Point(1, "a")` from module `values` | `{"values:Point": {"x": 1, "y": "a"}}` |
+| `ValueError("bad", 3)` | `{"builtins:ValueError": {"*": {"tuple": ["bad", 3]}}}` |
 
 `expected` is left out when there is none, so a recorded `None` stays distinct from a missing expectation.
 
@@ -45,7 +46,7 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 }
 ```
 
-- `status` is one of `missing`, `mismatch`, `conflict`, `unsupported`, or `unlocatable`.
+- `status` is one of `missing`, `mismatch`, `conflict`, `unsupported`, `returned`, or `unlocatable`.
 - `acceptable` is true for `missing` and `mismatch`.
 - `detail` says why a group can't be accepted.
 - `actuals` holds the distinct actual values, one when every call agreed.

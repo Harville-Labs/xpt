@@ -13,6 +13,7 @@ xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,run,mcp} [options
 | `--json` | all | Print one JSON object on stdout. See [JSON output](json.md). |
 | `--root ROOT` | all | The project root. Default `.`. |
 | `--run RUN` | `failures`, `show`, `accept`, `reject` | A run id from `xpt runs`. Default the latest run. |
+| `--since REF` | `show`, `accept` | The git ref to diff the changed code against. Default the merge base with the default branch, or `HEAD`. See [Changed code](#changed-code). |
 
 ## Commands
 
@@ -28,6 +29,30 @@ Show one call site with its function and tests.
 |---|---|
 | `--full` | Lift the change and length limits and print both whole values. |
 
+#### Changed code
+
+When the run was traced with `pytest --xpt-trace`, `xpt show` also prints the changed lines its tests ran, grouped by function:
+
+```text
+7f3a  tests/test_price.py:14  mismatch  1 test
+  function: test_total
+  test: tests/test_price.py::test_total
+  value["total"]: 110.0 -> 99.0
+  1 changed, 3 unchanged
+  changed code this test ran (since main):
+    src/shop/price.py:31 apply_discount
+      - rate = 0.1
+      + rate = 0.2
+Next: xpt accept 7f3a
+```
+
+- The diff is `git diff` against `--since REF`, or by default the merge base of `HEAD` with the default branch (`origin/HEAD`, `main`, or `master`), or `HEAD` when there is none. Staged, unstaged, and untracked `.py` files count.
+- When the tests ran no changed line, it prints `no changed code ran; the expectation or the environment changed (diff against main)`. The expectation is likely stale, or the failure comes from data, time, or the platform.
+- A file edited after the run is left out, on a `changed since the run, left out:` line, because its line numbers no longer match. Run the tests again.
+- Without a trace, it prints `no trace of these tests; run them with pytest --xpt-trace to see the changed code they ran`. `pytest --lf --xpt-trace` reruns only the failed tests.
+- Without git, or outside a repository, it prints one `changed code: unknown, ...` line.
+- 10 lines of 80 characters are shown. `--full` lifts the limits.
+
 ### `xpt accept [ID ...]`
 
 Write actual values into the test source.
@@ -39,6 +64,8 @@ Write actual values into the test source.
 | `--dry-run` | Report what would change and write nothing. |
 | `--force` | Also accept values that look broken. See below. |
 | `--verify` | After writing, rerun only the tests that observed the accepted call sites, and report whether they pass. |
+
+After each call site's line, accept prints the changed code its tests ran, as [`xpt show`](#changed-code) does, read before anything is written. A call site with no trace prints nothing extra.
 
 `--verify` runs `python -m pytest <node ids>` with the interpreter that runs xpt, from the project root. The node ids come from the run record, so tests that recorded nothing at those call sites are not run. When they pass, xpt prints `Verified: the 2 accepted tests pass.` When they fail, it prints pytest's output and exits `1`. When nothing was written, nothing is rerun. The rerun records a run like any other test run, so it becomes the latest run. `--verify` can't be combined with `--dry-run`.
 
@@ -180,6 +207,7 @@ Serve `failures`, `show`, `accept`, `reject`, `runs`, and `flaky` as MCP tools o
   .gitignore            "*", written on first use
   runs/<run>/<worker>.jsonl
   runs/<run>/source     the project source digest, for xpt flaky
+  runs/<run>/<worker>.trace.json  with pytest --xpt-trace, the lines each failing test ran
   latest                the id of the newest complete run
   decisions.jsonl       rejections, one per line
   accept.lock           held while accept or reject writes

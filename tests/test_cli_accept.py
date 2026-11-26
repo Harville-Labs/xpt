@@ -4,7 +4,7 @@ import sys
 import textwrap
 
 import pytest
-from cli_support import Ran, xpt
+from cli_support import NOT_TRACED, Ran, xpt
 
 SOURCE = """\
 import pytest
@@ -78,6 +78,7 @@ def test_accept_json_lists_each_outcome_and_the_changed_files(
                 "site": {"path": "test_it.py", "line": 5, "qualname": "test_missing"},
                 "status": "accepted",
                 "reason": "",
+                "changed_code": NOT_TRACED,
             }
         ],
         "changed": ["test_it.py"],

@@ -12,6 +12,7 @@ from xpt.site import CallSite, Unlocatable
 from xpt.value import Dict, Int, Str, Value
 
 RUN = "20260101T000000-aaaa"
+NOT_TRACED = {"status": "no_trace", "since": None, "functions": [], "stale": [], "note": ""}
 OLD = "20251231T000000-bbbb"
 
 

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from xpt.accept import AcceptResult
+from xpt.changed import NO_TRACE, NONE_RAN, ChangedCode
 from xpt.decisions import FILE, RejectOutcome
 from xpt.diff import Change, Diff
 from xpt.flaky import Volatile
 from xpt.group import Group
 from xpt.path import format_path
-from xpt.report import MAX_CHANGES, MAX_CHARS, changes, show
+from xpt.report import MAX_CHANGES, MAX_CHARS, changes, cut, show
 from xpt.rewrite import Outcome
 from xpt.site import CallSite, Unlocatable
 from xpt.value import Json, to_json
@@ -79,8 +80,10 @@ def failures_lines(run: str, groups: Sequence[Group], run_option: str) -> Lines:
     return [*lines, f"{summary} Fix the tests and run them again."]
 
 
-def show_lines(g: Group, full: bool, run_option: str) -> Lines:
+def show_lines(g: Group, full: bool, run_option: str, changed: ChangedCode | None = None) -> Lines:
     lines = group_lines(g, verbose=True, full=full)
+    if changed is not None:
+        lines += changed_lines(changed, len(g.tests), full=full)
     if g.rejected:
         return [
             *lines,
@@ -93,10 +96,17 @@ def show_lines(g: Group, full: bool, run_option: str) -> Lines:
 
 
 def accept_lines(
-    result: AcceptResult, dry_run: bool, run_option: str, target: str, *, verified: bool = False
+    result: AcceptResult,
+    dry_run: bool,
+    run_option: str,
+    target: str,
+    *,
+    verified: bool = False,
+    changed: Mapping[str, ChangedCode] | None = None,
 ) -> Lines:
-    """`verified` leaves out "Next: run the tests.", because --verify just ran them."""
-    lines = outcome_lines(result.outcomes)
+    """`verified` leaves out "Next: run the tests.", because --verify just ran them.
+    `changed` holds the changed code each group's tests ran, by group id."""
+    lines = outcome_lines(result.outcomes, changed)
     counts = f"({_statuses(o.status for o in result.outcomes)})"
     files = ", ".join(result.changed)
     if dry_run:
@@ -176,13 +186,79 @@ def reject_lines(outcomes: Sequence[RejectOutcome]) -> Lines:
     return [*lines, f"{done} ({counts}). Next: fix the code under test, then run the tests."]
 
 
-def outcome_lines(outcomes: Sequence[Outcome | RejectOutcome]) -> Lines:
-    lines = []
+def outcome_lines(
+    outcomes: Sequence[Outcome | RejectOutcome], changed: Mapping[str, ChangedCode] | None = None
+) -> Lines:
+    """A heading and reason per outcome. With `changed`, the changed code each group's tests
+    ran, and once at the end why it is unknown when git could not diff. A group with no
+    trace prints nothing, because `xpt show` already says how to trace it."""
+    lines: Lines = []
+    notes: Lines = []
     for o in outcomes:
         lines.append(heading(o.group.id, o.group.site, o.status))
         if o.reason:
             lines.append(f"  {o.reason}")
-    return lines
+        found = (changed or {}).get(o.group.id or "")
+        if found is None:
+            continue
+        shown = changed_lines(found, len(o.group.tests))
+        if found.status in ("ran", "none_ran"):
+            lines += shown
+        elif found.status == "no_git" and (note := shown[0].strip()) not in notes:
+            notes.append(note)
+    return lines + notes
+
+
+def changed_lines(c: ChangedCode, tests: int, *, full: bool = False) -> Lines:
+    """The changed hunks the group's tests ran, grouped by function, cut to MAX_CHANGES lines
+    of MAX_CHARS unless `full`."""
+    limit, width = (None, None) if full else (MAX_CHANGES, MAX_CHARS)
+    if c.status == "no_trace":
+        return [f"  {NO_TRACE}"]
+    if c.status == "no_git":
+        return [f"  changed code: unknown, {c.note}."]
+    stale = [f"  changed since the run, left out: {', '.join(c.stale)}"] if c.stale else []
+    if c.status == "none_ran":
+        return [f"  {NONE_RAN} (diff against {c.since})", *stale]
+    who = "this test" if tests == 1 else "these tests"
+    body: Lines = []
+    for f in c.functions:
+        where = ",".join(str(h.start) for h in f.hunks)
+        body.append(f"    {f.path}:{where} {f.name or '<module>'}")
+        text = [t for h in f.hunks for t in (*h.removed, *h.added) if t.strip()]
+        indent = min((len(t) - len(t.lstrip()) for t in text), default=0)
+        for h in f.hunks:
+            body += [f"      - {cut(t[indent:].rstrip(), width)}" for t in h.removed]
+            body += [f"      + {cut(t[indent:].rstrip(), width)}" for t in h.added]
+    shown = body if limit is None else body[:limit]
+    if hidden := len(body) - len(shown):
+        shown.append(f"    ... {_count(hidden, 'more line')}")
+    return [f"  changed code {who} ran (since {c.since}):", *shown, *stale]
+
+
+def changed_json(c: ChangedCode) -> dict[str, Json]:
+    return {
+        "status": c.status,
+        "since": c.since,
+        "functions": [
+            {
+                "path": f.path,
+                "function": f.name,
+                "hunks": [
+                    {
+                        "line": h.start,
+                        "count": h.count,
+                        "removed": list(h.removed),
+                        "added": list(h.added),
+                    }
+                    for h in f.hunks
+                ],
+            }
+            for f in c.functions
+        ],
+        "stale": list(c.stale),
+        "note": c.note,
+    }
 
 
 def runs_lines(runs: Sequence[tuple[str, bool, int]]) -> Lines:
@@ -259,14 +335,22 @@ def change_json(c: Change, *, labeled: bool = False) -> dict[str, Json]:
     return data
 
 
-def accept_json(result: AcceptResult) -> dict[str, Json]:
-    return {"outcomes": [outcome_json(o) for o in result.outcomes], "changed": list(result.changed)}
+def accept_json(
+    result: AcceptResult, changed: Mapping[str, ChangedCode] | None = None
+) -> dict[str, Json]:
+    """`changed` adds `changed_code` to the outcome of each group it names, by id."""
+    found = changed or {}
+    outcomes = [outcome_json(o, found.get(o.group.id or "")) for o in result.outcomes]
+    return {"outcomes": outcomes, "changed": list(result.changed)}
 
 
-def outcome_json(o: Outcome | RejectOutcome) -> dict[str, Json]:
-    return {
+def outcome_json(o: Outcome | RejectOutcome, changed: ChangedCode | None = None) -> dict[str, Json]:
+    data: dict[str, Json] = {
         "id": o.group.id,
         "site": site_json(o.group.site),
         "status": o.status,
         "reason": o.reason,
     }
+    if changed is not None:
+        data["changed_code"] = changed_json(changed)
+    return data

@@ -9,6 +9,7 @@ This project uses xpt inline expect tests (https://harville-labs.github.io/xpt/)
 - Never run `xpt accept --all` without reading every diff `xpt failures` prints first.
 - When accept reports `suspect`, the value looks like a failure. Fix the code. Use `xpt accept --force <id>` only when that value is really the intended result.
 - A `flaky:` line under a diff means that path changed between runs with no source change, such as a timestamp or a list built from a set. Add the option it suggests (`ignore=`, `unordered=True`, or `atol=`) to the `expect()` call, or the `xpt_deterministic` fixture to the test when it names it, and run the tests again, instead of accepting the value.
+- To see which of your changes a failing test ran, rerun it with `pytest --lf --xpt-trace`, then read `xpt show <id>`. `no changed code ran` means your edits did not reach that test, so the expectation or the environment changed, not the code under test.
 - Don't hand-edit an expected value that xpt can write. Accept it, so the value is exactly what the code returned.
 - `xpt show <id> --full` prints whole values when the diff is cut.
 - Use `--json` on any xpt command when parsing its output.

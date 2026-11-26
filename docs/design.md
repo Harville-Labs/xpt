@@ -134,6 +134,25 @@ Volatile        # a path of a group's value that differed between stored runs (s
   spread: float | None    # the largest difference, for floats
   suggestion              # derived: ignore=[...], unordered=True, atol=..., or None
 
+Trace           # the project lines each recorded test ran, from pytest --xpt-trace (see Changed code)
+  files: {path: str}      # sha256 of each file a stored test ran, when the run ended
+  tests: {test: {path: [int]}}  # node id -> 1-based lines it ran, with the module and class
+                                # body lines of each file it ran
+
+Hunk            # one run of changed lines from git diff, against the working tree
+  path: str
+  start: int              # first new-side line; for a removal, the line before it
+  count: int              # new-side lines, 0 for a removal
+  removed: [str]
+  added: [str]
+
+ChangedCode     # what show and accept print under a group (see Changed code)
+  status: "ran" | "none_ran" | "no_trace" | "no_git"
+  since: str | None       # the ref diffed against, None without a diff
+  functions: [(path, function | None, [Hunk])]  # changed hunks the group's tests ran
+  stale: [path]           # files the tests ran that changed since the run, left out
+  note: str               # the git error for no_git
+
 Outcome         # what accept did with one group
   group: Group
   status: "accepted" | "already_accepted" | "stale" | "skipped" | "suspect"
@@ -204,14 +223,16 @@ pytest run
   expect(actual, expected?)
     compare -> pass: nothing written
             -> fail: Observation appended to .xpt/runs/<run>/<worker>.jsonl
+  with --xpt-trace: the project lines of each test that recorded one, in <worker>.trace.json
   session end: with --expect-accept, accept the named groups (as xpt accept <id>)
                with --expect-create, accept the run's other missing groups (as xpt accept --missing)
                one block per failure, a one-line footer with the next command, pytest's exit code
 
 xpt failures                every group of the latest run, each with its diff
-xpt show <id>               one group with its function and tests, paths only, with limits
+xpt show <id> [--since REF] one group with its function and tests, paths only, with limits,
+                            and the changed code its tests ran (see Changed code)
 xpt show <id> --full        no limits, plus both whole values
-xpt accept <id>... [--dry-run] [--force] [--verify]
+xpt accept <id>... [--dry-run] [--force] [--verify] [--since REF]
 xpt accept --missing        fill every missing expectation, nothing else
 xpt accept --all            every group not rejected; those that cannot be accepted are reported with their reason
 xpt runs                    the recorded runs, newest first
@@ -295,6 +316,46 @@ Open questions, resolved:
 - **Do repeated runs count?** No. A run is one pytest session. `pytest --count` (pytest-repeat) runs the same call site several times in one session, and calls that disagree already make the group a `conflict` that names each value.
 - **Which runs?** Every stored run with the same fingerprint and digest, not only earlier ones, because run ids started in the same second do not sort by time. Five runs are kept, so the comparison is bounded.
 
+### Changed code
+
+When an expectation fails, the agent has to decide whether the new value is intended or a bug, and the value diff alone does not say which edit caused it. `pytest --xpt-trace` records the project lines each test ran, and `xpt show` and `xpt accept` intersect them with `git diff`:
+
+```
+7f3a  tests/test_price.py:14  mismatch  1 test
+  function: test_total
+  test: tests/test_price.py::test_total
+  value["total"]: 110.0 -> 99.0
+  1 changed, 3 unchanged
+  changed code this test ran (since main):
+    src/shop/price.py:31 apply_discount
+      - rate = 0.1
+      + rate = 0.2
+Next: xpt accept 7f3a
+```
+
+- **Recording.** `xpt.trace.Tracer` records lines of project files: `.py` files under the root, outside hidden directories, `__pycache__`, `node_modules`, `site-packages`, and virtual environments, the same rule as the source digest (`sources.project_file`). On Python 3.12 and later it uses `sys.monitoring`. A `PY_START` callback turns on `LINE` events only for project code objects and returns `DISABLE`, so installed code costs one callback per code object per test. Each `LINE` callback records the line and returns `DISABLE`, so a line costs one callback per test. `begin()` calls `sys.monitoring.restart_events()` at the start of each test to turn them back on. It takes the coverage tool id, or 4 or 3 when coverage.py holds it. On 3.11 it uses `sys.settrace` and `threading.settrace`, and the global trace function returns a local one only for project frames. 3.11 allows one trace function, so `--xpt-trace` beside coverage or a debugger is a usage error there.
+- **Contexts.** The plugin calls `begin()` and `end()` around `pytest_runtest_protocol`, so a test's lines include its fixtures' setup and teardown. Module and class bodies, which are code without `CO_OPTIMIZED`, mostly run at import, before any test. Their lines are also kept as definitions, and a test counts the definitions of every file it ran a line in. A changed constant, default, or signature in a module the test used still shows. A module the test only read a name from, without running a line of it, does not.
+- **Storage.** Only tests that recorded an observation are kept, because only those can be shown or accepted. At session end each process, controller or xdist worker, writes `runs/<run>/<worker>.trace.json` when it kept one: `{"schema_version": 1, "files": {path: sha256}, "tests": {node id: {path: [line, ...]}}}`. Nothing is shared during the run, as with observations. Reading joins every worker's file and validates every field, and the trace is only data.
+- **The diff.** `xpt.changes` runs `git diff --unified=0 --relative <base> -- '*.py'` from the root, so staged and unstaged changes count, and `git ls-files --others --exclude-standard` adds each untracked `.py` file as one hunk. `--since REF` diffs against `REF`. The default is the merge base of `HEAD` with the default branch: `origin/HEAD`, then `main`, `master`, `origin/main`, `origin/master`. With none, it is `HEAD`, and in a repository with no commits the empty tree. git is optional. Without git, or outside a repository, the group gets one line, `changed code: unknown, not a git repository.`, and accept prints it once. git runs only when the run has a trace.
+- **The intersection.** A hunk ran when the test ran one of its new lines. A removal ran when the test ran the line on either side of it. A file whose sha256 differs from the trace's changed after the run, so its line numbers no longer hold. It is left out and named on a `changed since the run, left out:` line. Hunks are grouped by the innermost function or class around their first line, from the working tree's syntax tree, `<module>` at module level, and printed with the common indentation removed. The default limits are 10 lines of 80 characters, and `--full` lifts them.
+- **Nothing ran.** When the tests ran no changed line, show prints `no changed code ran; the expectation or the environment changed (diff against main)`. That is a strong hint that the expectation itself is stale, or that the failure comes from data, time, or the platform.
+- **No trace.** `xpt show` says `no trace of these tests; run them with pytest --xpt-trace to see the changed code they ran`. `xpt accept` prints nothing for a group without a trace, so an untraced accept reads as before. `--json` always carries `changed_code`, with `status` `no_trace`.
+- **Reuse.** Coverage in the diff (#63) needs the same three parts: `trace.Tracer` for the lines, `changes.changes` for the diff, and `changes.function_at` for grouping by function.
+
+Open questions, resolved:
+
+- **Every run, or opt-in?** Opt-in for now, through `--xpt-trace`. Measured on this repository's suite on macOS, wall time as pytest reports it, on a machine with other work running:
+
+  | Python | Suite | Without | With `--xpt-trace` |
+  |---|---|---|---|
+  | 3.11 (`sys.settrace`) | whole suite, 656 tests | 51.6 to 56.1 s | 53.8 to 55.9 s |
+  | 3.13 (`sys.monitoring`) | whole suite | 63.1 s | 57.8 s |
+  | 3.11 | 160 in-process tests (serialize, diff, source, rewrite, expect, group, convert) | 2.0 to 2.1 s | 3.4 to 4.1 s |
+  | 3.13 | the same 160 | 2.8 s | 2.8 s |
+
+  The whole suite spends most of its time in `pytester` subprocesses, which are not traced, so its numbers are within noise. The in-process tests run xpt's own code, all of it project code here, and show the real cost: about 70 to 100 percent on 3.11, where every project line calls a Python trace function, and about 2 percent on 3.12 and later, where each line calls back once per test. The 3.11 cost is too much to pay on every run of every project for a question asked only when an expectation fails, and an agent can rerun only the failed tests with `pytest --lf --xpt-trace` when it needs the answer. On 3.12 and later the cost is small enough that turning it on by default there is the likely next step, once a larger project confirms the number.
+- **Accept or show?** Both. Accept prints the changed code before it writes, because accept is where a wrong decision lands, and it computes the hunks before writing so the accept's own edit does not show.
+
 ## Persistence
 
 ```
@@ -302,6 +363,7 @@ Open questions, resolved:
   .gitignore            # "*", written on first use
   runs/<run>/<worker>.jsonl
   runs/<run>/source     # the project source digest, written by the pytest controller
+  runs/<run>/<worker>.trace.json  # with --xpt-trace, the lines each failing test ran
   latest                # the run id of the newest complete run
   decisions.jsonl       # reject decisions, one per line (see Rejection)
 ```
@@ -549,7 +611,7 @@ On the crash fixtures in `tests/crash_project.py`, the compact traceback is abou
 
 ## Risks
 
-- **Rubber-stamping.** The tool makes accepting cheap, so agents will accept regressions. Mitigations: no bulk accept by default, the diff shown at accept time, `--dry-run`, and refusing suspect values without `--force`. The benchmark (M5) measures how often wrong accepts happen. We do not claim to prevent them.
+- **Rubber-stamping.** The tool makes accepting cheap, so agents will accept regressions. Mitigations: no bulk accept by default, the diff shown at accept time, `--dry-run`, refusing suspect values without `--force`, and, with `--xpt-trace`, the changed code the failing test ran (see Changed code). The benchmark (M5) measures how often wrong accepts happen. We do not claim to prevent them.
 - **Dynamic call sites.** `expect` called through a helper reports the helper's frame. We support `expect(..., _depth=1)` the way expecttest supports `skip`. A call created through `functools.partial` or `exec` has no source to rewrite. We record it as unsupported for rewriting, and the comparison still runs.
 - **Generated or non-file sources** (doctests, notebooks, `python -c`): same as above.
 - **Floats and nondeterminism.** Dict order, set order, timestamps, ids, and memory addresses make snapshots flaky. Sorting covers sets, `unordered=` covers lists, `ignore=` covers volatile dict entries, and adapters cover the rest. `xpt flaky` finds the paths that need them from the stored runs, and accept refuses them. `xpt_deterministic` pins the clock, `random`, and `uuid` in the standard library so the values don't vary in the first place. Default `repr` of arbitrary objects is never used, because it embeds addresses.
@@ -575,7 +637,7 @@ Recorded values may also use helpers reached through `expect`, so a file that im
 
 `expect.output(capsys)` expects captured stdout and stderr, or a `CompletedProcess`, as lists of lines (see Expecting output).
 
-pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, `--xpt-json PATH`, and `--xpt-deterministic`. The plugin's fixture is `xpt_deterministic` (see Deterministic tests). unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
+pytest plugin options: `--expect-create`, `--expect-accept=ID[,ID...]`, `--expect-no-record`, `--xpt-report=xpt|pytest`, `--xpt-json PATH`, `--xpt-deterministic`, and `--xpt-trace`. The plugin's fixture is `xpt_deterministic` (see Deterministic tests). unittest works with no plugin, because `expect` raises `AssertionError` and records through the same process-level recorder. Its test id falls back to the qualname.
 
 ## Roadmap
 

@@ -1,8 +1,21 @@
 from pathlib import Path
 
 import pytest
-from cli_support import EVERY_KIND, MISMATCH, MISSING, OLD, RUN, Ran, observed, op, recorded, xpt
+from cli_support import (
+    EVERY_KIND,
+    MISMATCH,
+    MISSING,
+    NOT_TRACED,
+    OLD,
+    RUN,
+    Ran,
+    observed,
+    op,
+    recorded,
+    xpt,
+)
 
+from xpt.changed import NO_TRACE
 from xpt.record import state_directory
 from xpt.value import Dict, Int, Null, Str
 
@@ -181,6 +194,7 @@ def test_show_prints_one_group_with_its_function_tests_and_diff(
         "  test: tests/test_a.py::test_a[2]\n"
         '  value["op"]: "add" -> "sub"\n'
         "  1 changed, 1 unchanged\n"
+        f"  {NO_TRACE}\n"
         "Next: xpt accept df55\n"
     )
 
@@ -194,7 +208,7 @@ def test_show_json_is_the_group_alone(project: Path, capsys: pytest.CaptureFixtu
         "schema_version": 1,
         "command": "show",
         "run": RUN,
-        "group": whole["groups"][1],
+        "group": whole["groups"][1] | {"changed_code": NOT_TRACED},
     }
 
 
@@ -205,7 +219,8 @@ def test_show_says_why_a_conflict_cannot_be_accepted(
     ran = xpt(capsys, "show", "c9cc")
     assert ran.code == 0
     assert ran.out.endswith(
-        f"  {CONFLICT_DETAIL}\nc9cc cannot be accepted. Fix the test and run it again.\n"
+        f"  {CONFLICT_DETAIL}\n  {NO_TRACE}\n"
+        "c9cc cannot be accepted. Fix the test and run it again.\n"
     )
 
 
@@ -243,7 +258,7 @@ def test_long_values_and_long_diffs_are_cut_unless_full(
     assert full[3].startswith('  expected: {"k0": 0, "k1": 1, ')
     assert full[4].startswith('  actual: {"k0": 0, "k1": 2, ')
     assert len(full[4]) > 100
-    assert full[-3:] == ['  value["k11"]: 11 -> 22', "  11 changed, 1 unchanged", full[-1]]
+    assert full[-4:-1] == ['  value["k11"]: 11 -> 22', "  11 changed, 1 unchanged", f"  {NO_TRACE}"]
     assert xpt(capsys, "show", "aa26", "--full").out.splitlines()[3] == f'  actual: "{long}"'
 
 

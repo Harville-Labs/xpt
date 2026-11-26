@@ -94,6 +94,11 @@ class Tool:
 
 
 _RUN = Param("string", "A run id from xpt_runs. Default: the latest run.")
+_SINCE = Param(
+    "string",
+    "The git ref to diff the changed code against. Default: the merge base with the "
+    "default branch, or HEAD.",
+)
 _IDS = "Call site ids from xpt_failures."
 
 TOOLS = {
@@ -118,6 +123,7 @@ TOOLS = {
                 "id": Param("string", "A call site id from xpt_failures."),
                 "run": _RUN,
                 "full": Param("boolean", "Lift the change and length limits."),
+                "since": _SINCE,
             },
             required=("id",),
         ),
@@ -139,6 +145,7 @@ TOOLS = {
                     "boolean", "Rerun the tests that observed the accepted call sites."
                 ),
                 "run": _RUN,
+                "since": _SINCE,
             },
             read_only=False,
         ),

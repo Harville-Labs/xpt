@@ -11,6 +11,8 @@ expect(actual, expected, unordered=True)  # lists compare as multisets
 expect(actual, {1: 2, 2: 4}, key=n)  # one expected value per parametrized case
 expect.output(capsys)  # captured stdout and stderr as lists of lines
 expect.raises(lambda: parse("x"))  # missing: fails and records what parse raised
+with expect.raises():  # the same for a block of statements
+    parser.feed(data)
 ```
 
 `expect` compares `actual` with `expected`. When they differ, or when `expected` is left out, the test fails with `ExpectationFailed` and xpt records the actual value under `.xpt/` so `xpt accept` can write it into the source.
@@ -149,6 +151,20 @@ expect.raises(lambda: parse("x"))
 expect.raises(lambda: parse("x"), ValueError("invalid literal for int() with base 10: 'x'"))
 ```
 
+For code that isn't one call, use the block form. The expected exception is its first argument:
+
+```python
+with expect.raises():
+    parser.feed(data)
+    parser.close()
+# after xpt accept:
+with expect.raises(ValueError("unexpected end of input")):
+    parser.feed(data)
+    parser.close()
+```
+
+The block form compares when the block ends and follows every rule below, including `subclass=` and `ignore=`. Write `expect.raises(...)` directly as the `with` item. A context manager made earlier and entered later still compares, but xpt can't tell where its expected exception goes, so the failure is `unlocatable`. When a `with` statement holds two `expect.raises()` items, the innermost one catches the exception, and the outer one sees none.
+
 Two exceptions are equal when they have the same type, the same `args`, and the same `__notes__`. The traceback, `__cause__`, `__context__`, and other attributes are not compared or recorded. The type must match exactly. Pass `subclass=True` to let a subclass of the expected type match. When a subclass differs in its args, xpt records it under the expected type, so accepting keeps the type you wrote.
 
 A failure names the part that differs, with `.args` as the path to the arguments:
@@ -161,9 +177,9 @@ expect.raises() mismatch:
 
 `ignore=` takes paths the same way as for `expect()`, so it removes dict entries inside the arguments, such as `ignore=['value.args[0]["id"]']`. It can't remove an argument itself, because xpt must write every argument to rebuild the exception.
 
-When `fn` returns instead of raising, the call fails with what it returned, `expect.raises(): parse("3") returned 3 instead of raising.`, and the failure has status `returned`. It can't be accepted. Fix the code, or `expect()` the return value instead.
+When `fn` returns instead of raising, the call fails with what it returned, `expect.raises(): parse("3") returned 3 instead of raising.`, and the failure has status `returned`. A block that finishes fails the same way, with `expect.raises(): the with block finished without raising.` and no value. It can't be accepted. Fix the code, or `expect()` the return value instead.
 
-`expect.raises` catches every `Exception` and `SystemExit`. `KeyboardInterrupt`, `GeneratorExit`, and other `BaseException` subclasses pass through, unless the expected value is one of them. A failed `expect()` inside `fn` always passes through, so it reports as itself.
+`expect.raises` catches every `Exception` and `SystemExit`. `KeyboardInterrupt`, `GeneratorExit`, and other `BaseException` subclasses pass through, unless the expected value is one of them. A failed `expect()` inside `fn` or the block always passes through, so it reports as itself.
 
 xpt writes an exception as a call to its class with its `args`. It first checks that calling the class with those `args` gives back the same `args`. A class whose `__init__` takes other arguments, such as `json.JSONDecodeError`, fails that check, and so does any exception with notes. Those are written through `expect.exception`, which builds the instance without calling `__init__`:
 
@@ -180,8 +196,6 @@ An `ExceptionGroup` is written with its children, as `ExceptionGroup("many", [Va
 The class is written by name under the same rules as a dataclass (see below), so a project exception needs an import in the test file. When the file has none, the accept is skipped and the reason names the import to add, such as `JSONDecodeError` from `json.decoder`.
 
 `expect(error, ValueError("bad"))` compares a caught exception the same way, and an exception inside a dict or list is recorded the same way.
-
-`expect.raises` has no context-manager form yet. Wrap code that isn't one call in a function.
 
 ## Writing a dataclass, model, or array
 

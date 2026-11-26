@@ -11,7 +11,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from types import FrameType
+from types import CodeType, FrameType
+from typing import Any
 
 SiteKey = tuple[str, str, str, int]
 
@@ -37,6 +38,27 @@ class Unlocatable:
     line: int
 
 
+@dataclass(frozen=True, slots=True)
+class WithItem:
+    """The frame state of a call made as a `with` item, saved when the call ran.
+
+    The frame moves on to the block before `__exit__` compares, so the call's position has
+    to be kept from when the context manager was made.
+    """
+
+    f_code: CodeType
+    f_lasti: int
+    f_lineno: int
+    f_globals: dict[str, Any]
+
+    @classmethod
+    def of(cls, frame: FrameType) -> WithItem:
+        return cls(frame.f_code, frame.f_lasti, frame.f_lineno, frame.f_globals)
+
+
+Frame = FrameType | WithItem
+
+
 def call_site(depth: int, root: Path) -> CallSite | Unlocatable:
     """Identify a call on the stack.
 
@@ -46,7 +68,7 @@ def call_site(depth: int, root: Path) -> CallSite | Unlocatable:
     return locate(sys._getframe(depth + 1), root)
 
 
-def locate(frame: FrameType, root: Path) -> CallSite | Unlocatable:
+def locate(frame: Frame, root: Path) -> CallSite | Unlocatable:
     """Identify the call that `frame` is running, by function, ordinal, and argument text."""
     found = _running(frame, root)
     if isinstance(found, Unlocatable):
@@ -55,7 +77,7 @@ def locate(frame: FrameType, root: Path) -> CallSite | Unlocatable:
     return CallSite(path, qualname, callee(call), ordinal(calls, call), arg_sha(source, call), line)
 
 
-def called_text(frame: FrameType, root: Path) -> str | None:
+def called_text(frame: Frame, root: Path) -> str | None:
     """What the first argument of the running call calls, as source text: `parse("x")` for
     `lambda: parse("x")`, `run()` for `run`. None when xpt cannot find the call."""
     found = _running(frame, root)
@@ -73,7 +95,7 @@ def called_text(frame: FrameType, root: Path) -> str | None:
 _Running = tuple[str, str, str, list[ast.Call], ast.Call, int]
 
 
-def _running(frame: FrameType, root: Path) -> _Running | Unlocatable:
+def _running(frame: Frame, root: Path) -> _Running | Unlocatable:
     code = frame.f_code
     filename = code.co_filename
     path = _relative_path(filename, root)
@@ -114,6 +136,11 @@ def _running(frame: FrameType, root: Path) -> _Running | Unlocatable:
             f"{path}:{line} has no call in {qualname} where the running code expects one. "
             "The file probably changed after it was imported. Run the tests again."
         )
+    if isinstance(frame, WithItem) and not in_with(found[0]):
+        return unlocatable(
+            f"{path}:{line} calls {callee(found[0])}() outside a with statement, so xpt "
+            "cannot tell where the expected exception goes. Write it as the with item."
+        )
     return path, qualname, source, calls, found[0], line
 
 
@@ -134,9 +161,19 @@ def find_call(calls: list[ast.Call], name: str, index: int) -> ast.Call | None:
     return same[index] if index < len(same) else None
 
 
+_WITH_ITEM = "xpt_with_item"
+
+
+def in_with(call: ast.Call) -> bool:
+    """Whether `call` is an item of a `with` statement, so its expected argument is the first."""
+    return getattr(call, _WITH_ITEM, False)
+
+
 def expected_arg(call: ast.Call) -> ast.expr | None:
-    if len(call.args) > 1:
-        return call.args[1]
+    """The expected argument: the second positional, or the first for a `with` item."""
+    at = 0 if in_with(call) else 1
+    if len(call.args) > at:
+        return call.args[at]
     return next((k.value for k in call.keywords if k.arg == "expected"), None)
 
 
@@ -223,6 +260,10 @@ def _collect(
         node = stack.pop()
         if isinstance(node, ast.Call):
             calls.append(node)
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            for item in node.items:
+                if isinstance(item.context_expr, ast.Call):
+                    setattr(item.context_expr, _WITH_ITEM, True)
         inner = _inner_scope(node)
         if inner is None:
             stack.extend(ast.iter_child_nodes(node))

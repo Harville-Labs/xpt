@@ -8,7 +8,7 @@ from typing import Literal
 
 from xpt import layout, pyfile
 from xpt.group import Group
-from xpt.site import Unlocatable, arg_sha, expected_arg, find_call, scopes_in
+from xpt.site import Unlocatable, arg_sha, expected_arg, find_call, in_with, scopes_in
 from xpt.source import display_width, to_source
 from xpt.value import Dataclass, Dict, Ref, Seq, Set, Value
 
@@ -182,7 +182,13 @@ def _plan(file: _File, group: Group) -> tuple[Outcome, _Edit | None]:
 
 
 def _edit(file: _File, call: ast.Call, value: Value, where: str) -> _Edit:
-    if not call.args or any(isinstance(a, ast.Starred) for a in call.args[:2]):
+    block = in_with(call)
+    if block and (len(call.args) > 1 or any(isinstance(a, ast.Starred) for a in call.args)):
+        raise _Unwritable(
+            f"{where} has more than the expected exception as positional arguments, "
+            "so xpt cannot tell where the expected value goes."
+        )
+    if not block and (not call.args or any(isinstance(a, ast.Starred) for a in call.args[:2])):
         raise _Unwritable(
             f"{where} has no plain first argument, "
             "so xpt cannot tell where the expected value goes."
@@ -194,6 +200,13 @@ def _edit(file: _File, call: ast.Call, value: Value, where: str) -> _Edit:
         text = layout.layout(_call(file, call, value, start, end, names))
         return _Edit(start, end, _encode(file, text))
     expected = expected_arg(call)
+    if expected is None and block:
+        func_end = file.offset(call.func.end_lineno or 0, call.func.end_col_offset or 0)
+        at = file.data.index(b"(", func_end) + 1
+        before = file.before(at)
+        literal = to_source(value, len(_leading(before)), column=display_width(before), names=names)
+        comma = ", " if call.keywords else ""
+        return _Edit(at, at, _encode(file, literal + comma))
     if expected is None:
         actual = call.args[0]
         at = file.offset(actual.end_lineno or actual.lineno, actual.end_col_offset or 0)
@@ -224,6 +237,8 @@ def _call(
     nodes: list[ast.expr | ast.keyword] = [*call.args, *call.keywords]
     nodes.sort(key=lambda n: (n.lineno, n.col_offset))
     parts: list[layout.Part] = []
+    if expected is None and in_with(call):
+        parts.append(layout.Literal("", value))
     for node in nodes:
         if node is expected:
             parts.append(layout.Literal("", value))
@@ -231,10 +246,12 @@ def _call(
             parts.append(layout.Literal(f"{node.arg}=", value))
         else:
             parts.append(file.segment(node))
-        if expected is None and node is call.args[0]:
+        if expected is None and call.args and node is call.args[0] and not in_with(call):
             parts.append(layout.Literal("", value))
-    last = nodes[-1]
+    last = nodes[-1] if nodes else call.func
     tail = file.data[file.offset(last.end_lineno or 0, last.end_col_offset or 0) : end - 1]
+    if not nodes:
+        tail = tail.lstrip().removeprefix(b"(")
     before = file.before(start)
     return layout.Call(
         head=file.segment(call.func),

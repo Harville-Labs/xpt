@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-from xpt import convert, decisions, flaky, init, render, traceback
+from xpt import convert, decisions, flaky, init, render, trace, traceback
 from xpt.accept import AcceptError, AcceptResult, accept, lock
+from xpt.changed import ChangedCode, Diff, changed_code
+from xpt.changes import GitError, changes
 from xpt.group import Group, group, missing, pick
 from xpt.record import (
     DIRECTORY,
@@ -75,13 +77,32 @@ def failures(args: argparse.Namespace, root: Path) -> Output:
     )
 
 
+def _changed(
+    root: Path, run: _Run, groups: Sequence[Group], since: str | None
+) -> dict[str, ChangedCode]:
+    """The changed code each group's tests ran, by group id. git runs only when the run
+    has a trace."""
+    found = trace.load(root, run.id)
+    diff: Diff = GitError("no trace")
+    if found is not None:
+        try:
+            diff = changes(root, since)
+        except GitError as error:
+            diff = error
+    return {g.id: changed_code(root, found, g.tests, diff) for g in groups if g.id is not None}
+
+
 def show(args: argparse.Namespace, root: Path) -> Output:
     run = _load(root, args.run)
     [g] = _pick(run, [args.id])
+    changed = _changed(root, run, [g], args.since).get(g.id or "")
+    data = render.group_json(g)
+    if changed is not None:
+        data["changed_code"] = render.changed_json(changed)
     return Output(
         0,
-        render.show_lines(g, args.full, run.run_option),
-        {"run": run.id, "group": render.group_json(g)},
+        render.show_lines(g, args.full, run.run_option, changed),
+        {"run": run.id, "group": data},
     )
 
 
@@ -111,10 +132,13 @@ def accept_command(args: argparse.Namespace, root: Path) -> Output:
     if not groups:
         empty = render.accept_json(AcceptResult((), ()))
         return Output(0, [f"Nothing to accept in run {run.id}."], data | empty)
+    changed = _changed(root, run, groups, args.since)
     result = accept(root, groups, dry_run=args.dry_run, force=args.force)
     written = all(o.status in ("accepted", "already_accepted") for o in result.outcomes)
-    lines = render.accept_lines(result, args.dry_run, run.run_option, target, verified=args.verify)
-    data |= render.accept_json(result)
+    lines = render.accept_lines(
+        result, args.dry_run, run.run_option, target, verified=args.verify, changed=changed
+    )
+    data |= render.accept_json(result, changed)
     if not args.verify:
         return Output(0 if written else 1, lines, data)
     checked = rerun(root, accepted_tests(result.outcomes))
@@ -208,6 +232,13 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument("--root", type=Path, default=Path(), help="the project root (default: .)")
     picked = _Parser(add_help=False)
     picked.add_argument("--run", help="a run id from xpt runs (default: the latest run)")
+    since = _Parser(add_help=False)
+    since.add_argument(
+        "--since",
+        metavar="REF",
+        help="the git ref to diff the changed code against (default: the merge base with "
+        "the default branch, or HEAD)",
+    )
 
     parser = _Parser(
         prog="xpt",
@@ -222,10 +253,10 @@ def _parser() -> argparse.ArgumentParser:
         return sub
 
     add("failures", failures, "list the failed call sites of a run, with their diffs", picked)
-    sub = add("show", show, "show one call site", picked)
+    sub = add("show", show, "show one call site", picked, since)
     sub.add_argument("id")
     sub.add_argument("--full", action="store_true", help="lift the change and length limits")
-    sub = add("accept", accept_command, "write actual values into the test source", picked)
+    sub = add("accept", accept_command, "write actual values into the test source", picked, since)
     sub.add_argument("ids", nargs="*", metavar="id")
     sub.add_argument("--all", action="store_true", help="every acceptable call site")
     sub.add_argument("--missing", action="store_true", help="only empty expectations")

@@ -54,7 +54,36 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 - `changes` and `unchanged` appear on a mismatch. `op` is `replace`, `add`, or `remove`.
 - `flaky` lists the paths whose value changed between stored runs with the same source, empty when none did. See [Flaky](#flaky).
 
-`xpt show ID --json` returns one group in the same form.
+`xpt show ID --json` returns one group in the same form, plus `changed_code`.
+
+## Changed code
+
+`xpt show --json` adds `changed_code` to the group, and `xpt accept --json` adds it to each outcome. See [Changed code](cli.md#changed-code).
+
+```json
+"changed_code": {
+  "status": "ran",
+  "since": "main",
+  "functions": [
+    {
+      "path": "src/shop/price.py",
+      "function": "apply_discount",
+      "hunks": [
+        {"line": 31, "count": 1, "removed": ["    rate = 0.1"], "added": ["    rate = 0.2"]}
+      ]
+    }
+  ],
+  "stale": [],
+  "note": ""
+}
+```
+
+- `status` is `ran` when the tests ran changed code, `none_ran` when they ran none, `no_trace` when the run was not traced with `pytest --xpt-trace`, and `no_git` when git could not diff.
+- `since` is the ref diffed against, null for `no_trace` and `no_git`.
+- `function` is the qualified name of the innermost function or class around the hunk, null at module level.
+- A hunk's `line` and `count` are its new lines in the working tree. A removal has `count` 0 and `line` the line before it. `removed` and `added` are the lines as they are in the files, uncut.
+- `stale` lists the files the tests ran that changed after the run, left out of `functions`.
+- `note` is the git error for `no_git`, empty otherwise.
 
 ## Accept and reject
 
@@ -72,7 +101,7 @@ Values use xpt's recorded form. It is plain JSON where JSON can say the type, an
 }
 ```
 
-An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).` or `value["created_at"] changed between 2 runs with no source change (rule: flaky).`
+Each accept outcome also has [`changed_code`](#changed-code). An accept outcome's `status` is `accepted`, `already_accepted`, `stale`, `skipped`, or `suspect`, and `reason` says why it wasn't written. A `suspect` reason names the path and the rule, as in `value["items"] is empty where the expected value had items (rule: empty).` or `value["created_at"] changed between 2 runs with no source change (rule: flaky).`
 
 With `--verify`, the accept object also has `verify`:
 

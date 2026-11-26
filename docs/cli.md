@@ -139,13 +139,22 @@ Asserts that are not an `==` comparison are left alone without a report. A file 
 |---|---|
 | `--dry-run` | Report what would change and write nothing. |
 
+### `xpt run [-v] -- COMMAND [ARG ...]`
+
+Run a command so that every Python process it starts prints uncaught exceptions in the compact shape of the pytest report, described in [Tracebacks outside pytest](traceback.md). It sets `XPT_TRACEBACK` and puts a `sitecustomize` module that installs the hooks first on `PYTHONPATH`. The exit code is the command's, and 127 when it can't be started. `--json` and `--root` do not apply.
+
+| Option | Meaning |
+|---|---|
+| `-v` | Raise the limits as `-v` does under pytest. |
+| `-vv` | Keep Python's full traceback. |
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | The command did what it was asked, or there was nothing to do. |
 | `1` | `failures` found failures, `flaky` found flaky call sites, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, or an `init` check found a problem. |
-| `2` | A usage error, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, or unpaired markers in `AGENTS.md`. The error is one line on stderr that says what to do next, and nothing is written. |
+| `2` | A usage error, such as `xpt run` without a command, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, or unpaired markers in `AGENTS.md`. The error is one line on stderr that says what to do next, and nothing is written. |
 
 ## Files
 

@@ -502,6 +502,31 @@ If the swap raises, xpt puts pytest's class back, registers it again if needed, 
 
 Known gaps: pytest 9.2's OSC 9;4 terminal progress indicator stays at 0%, because the report doesn't advance `reported_progress`. Behavior on a real terminal, where pytest rewrites lines, is tested only through the same code paths a pipe uses.
 
+### Tracebacks outside pytest
+
+Agents also read tracebacks from scripts, CLIs, servers, and `python -c`, which hold every site-packages frame, a block per chained exception, and a thousand frames for a recursion error. `xpt.traceback` prints an uncaught exception in the report's shape instead, from `sys.excepthook` and `threading.excepthook`:
+
+```
+RuntimeError: load failed
+  at app/chain.py:12 in load
+  > raise RuntimeError("load failed")
+  from chained.py:3 in <module>
+  during ValueError: no count at app/chain.py:5
+  caused by KeyError: 'count' at app/chain.py:3
+  locals:
+    row = {"name": "ada"}
+```
+
+- **Shared with the report.** `xpt.frames` holds what both outputs decide: which file is a project file (under the root and outside `site-packages` and `dist-packages`), how the caller chain is cut (the outermost frame and the 3 nearest), how an exception is named, and how its chain is walked. The limits are the report's `limits(verbosity)`: 200 characters per message, 80 per value, and 10 locals or chained exceptions, raised by `verbose`. Message lines come from the same function as the report's `Raised` detail. `tests/test_agent_report.py` pins the report on the same crash fixtures the traceback is tested on.
+- **What the hook adds.** The report shows one failure in a test, so it needs neither a library hop nor a recursion count. The hook prints `via pkg/module.py` for the first library module the deepest project frame called into, folds a repeated frame or a repeated cycle of up to 8 frames into one entry with a count, follows the whole chain one line per link (`caused by` for `from`, `during` for an implicit context) and lists an exception group's members as `member` lines, and prints the deepest project frame's locals through `serialize` and `show`. A value that cannot be serialized prints as `<module.Type>`, never as a `repr`, which would carry addresses and arbitrary output. Outside pytest the standard library, the installed packages, and the running Python's script directory, which can sit inside the project as `.venv/`, are also not project files. Code typed with `-c` is.
+- **Project root.** pytest's `rootdir` is not there, so the root is the nearest directory up from the start directory that holds `pyproject.toml` or `.git`, or the start directory itself. The start directory is read when the process starts, so a later `chdir` does not move the root.
+- **Activation: opt in, without a `.pth` file.** A `.pth` file in site-packages would run in every Python process of the environment, including pytest, editors, and tools that never asked, and a test library should not change how unrelated programs crash. So it is opt in, two ways. `xpt.traceback.install()` installs the hooks when `XPT_TRACEBACK` is set, so a program can call it unconditionally and keep Python's traceback for people. `xpt run -- <command>` sets `XPT_TRACEBACK` and puts `xpt/startup/` first on `PYTHONPATH`. Its `sitecustomize.py` installs the hooks in every Python process the command starts, including grandchildren. Python imports `sitecustomize` from `sys.path` at startup without any flag, so this works for `python script.py`, `python -m`, console scripts, and servers alike. Alternatives were worse: `PYTHONSTARTUP` runs only for interactive sessions, rewriting the command into `python -c` works only when the command is Python itself, and `usercustomize` is skipped in virtual environments.
+- **Startup cost and shadowing.** Importing xpt takes about 40 ms, so the `sitecustomize` imports nothing from xpt until an exception reaches a hook. It sets `_thread._excepthook`, which `threading` copies as its `excepthook` when first imported, so it does not import `threading` early, which gevent's monkey patching warns about. It removes its directory from `sys.path` and imports the `sitecustomize` it shadows, if any, before installing, so a project's own `sitecustomize` still runs and a hook it sets is replaced only because `xpt run` asked. A process that can't import xpt, such as one from another environment, prints Python's traceback.
+- **Same exit and destination.** The interpreter, not the hook, sets the exit code, so it stays 1 for an uncaught exception, and a thread's exception does not change it. The hook writes to `sys.stderr` and prints nothing when that is `None`, as Python's does. A thread's block starts with `Exception in thread <name>:` and `SystemExit` in a thread prints nothing. If formatting raises, the hook prints Python's traceback and a notice.
+- **Fallback.** `XPT_TRACEBACK=full`, `0`, or unset keep Python's traceback, and `xpt run -vv` sets `full`. `xpt run -v` and `XPT_TRACEBACK=verbose` raise the limits as `-v` does under pytest. `python -I` and `-E` ignore `PYTHONPATH`, so `xpt run` can't reach them.
+
+On the crash fixtures in `tests/crash_project.py`, the compact traceback is about a fifth of Python's on stderr, and the tests require at most a third.
+
 ## Concurrency
 
 - xdist: workers record and never write source. The controller sees every worker's file at read time. No IPC is needed. `--expect-create` and `--expect-accept` run in the controller's `pytest_sessionfinish`, after every worker has finished. The report drops the `[gw0] platform -- Python ...` line pytest puts at the top of each failure's text under xdist, so the report and `--xpt-json` match a run without xdist.
@@ -549,4 +574,5 @@ Each milestone ships on its own and is tracked as GitHub issues.
 - **M4. Adapters and xdist.** NumPy, pandas, PyTorch, Pydantic, attrs, and protobuf adapters are done. Tolerances (`atol=`, `rtol=`) are done. Large-array digests and mismatch counts are done. The xdist test matrix is done: `tests/test_xdist.py` runs a suite under `-n 2` and without xdist and checks that every worker's observations group as one run, that conflicting values from two workers are one conflict that accept refuses, that `--expect-create` and `--expect-accept` write once from the controller, that the report and `--xpt-json` match, and that `--expect-no-record` writes nothing. CI also runs the whole suite with `-n 4`.
 - **M5. Agent benchmark.** Fixture repos with seeded regressions. Claude Code and Codex run headless against plain asserts, expecttest, inline-snapshot, and xpt. We measure tokens, tool calls, test runs, wall time, wrong accepts, and final correctness.
 - **Setup and migration.** `xpt init` and `xpt convert` are done.
+- **Tracebacks outside pytest.** `xpt run` and `xpt.traceback.install()` are done.
 - **M6. Release.** Name check, docs, PyPI.

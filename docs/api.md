@@ -1,6 +1,6 @@
 # Python API
 
-`xpt` exports `expect` and `register` (see [Your own classes](expect.md#your-own-classes)). Tools that want the CLI's behavior without parsing its output import `xpt.api`. The CLI is a thin wrapper over these functions.
+`xpt` exports `expect` and `register` (see [Your own classes](expect.md#your-own-classes)). `xpt.traceback.install()` turns on compact tracebacks when `XPT_TRACEBACK` is set (see [Tracebacks outside pytest](traceback.md)). Tools that want the CLI's behavior without parsing its output import `xpt.api`. The CLI is a thin wrapper over these functions.
 
 ```python
 from pathlib import Path

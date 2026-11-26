@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from xpt import decisions, flaky, record, report
+from xpt import decisions, flaky, frames, record, report
 from xpt.accept import Accepted, after_session
 from xpt.deterministic import Pinned, deterministic
 from xpt.diff import diff
@@ -22,7 +22,6 @@ from xpt.value import Value
 MODES = ("xpt", "pytest")
 _COMPARED = pytest.StashKey[tuple[Value, Value] | None]()
 _MODE = pytest.StashKey[str]()
-_OUTSIDE = {"site-packages", "dist-packages"}
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -201,12 +200,12 @@ def _where(
     if excinfo is None:
         return Where(path, None if line is None else line + 1, None, Text(rep.longreprtext))
     detail = _detail(excinfo, compared)
-    cause = _cause(excinfo.value)
-    frames = _project_frames(excinfo, item.config.rootpath)
-    if not frames:
+    cause = frames.cause(excinfo.value)
+    found = _project_frames(excinfo, item.config.rootpath)
+    if not found:
         return Where(path, None if line is None else line + 1, None, detail, cause=cause)
     test = getattr(item, "originalname", item.name)
-    *callers, (path, lineno, name, source) = frames
+    *callers, (path, lineno, name, source) = found
     chain = tuple(Frame(p, n, None if f == test else f) for p, n, f, _ in callers)
     function = None if name == test else name
     return Where(path, lineno, function, detail, chain, source or None, cause)
@@ -215,17 +214,17 @@ def _where(
 def _project_frames(
     excinfo: pytest.ExceptionInfo[BaseException], root: Path
 ) -> list[tuple[str, int, str, str]]:
-    """Frames in files under `root` that are not installed packages, outermost first, as
-    (relative path, 1-based line, function, stripped source line)."""
-    frames = []
+    """Frames in project files under `root`, outermost first, as (relative path, 1-based
+    line, function, stripped source line)."""
+    found = []
     for entry in excinfo.traceback.filter(excinfo):
         path = Path(entry.path)
-        inside = path.is_absolute() and path.is_relative_to(root)
-        if inside and not _OUTSIDE.intersection(path.relative_to(root).parts):
+        relative = frames.project_path(path, root)
+        if relative is not None:
             line = entry.lineno + 1
             source = linecache.getline(str(path), line).strip()
-            frames.append((path.relative_to(root).as_posix(), line, entry.name, source))
-    return frames
+            found.append((relative, line, entry.name, source))
+    return found
 
 
 def _detail(
@@ -236,23 +235,7 @@ def _detail(
         return Expected(error.observation)
     if compared is not None and isinstance(error, AssertionError):
         return Compared(*compared)
-    message = "\n".join([str(error), *getattr(error, "__notes__", ())])
-    return Raised(_name(error), message)
-
-
-def _cause(error: BaseException) -> str | None:
-    cause = error.__cause__ or (None if error.__suppress_context__ else error.__context__)
-    if cause is None:
-        return None
-    message = " ".join(str(cause).split())
-    return f"{_name(cause)}: {message}" if message else _name(cause)
-
-
-def _name(error: BaseException) -> str:
-    kind = type(error)
-    if kind.__module__ == "builtins" or kind.__module__.startswith("_pytest."):
-        return kind.__qualname__
-    return f"{kind.__module__}.{kind.__qualname__}"
+    return Raised(frames.name(error), frames.message(error))
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:

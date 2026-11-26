@@ -152,6 +152,11 @@ def test_tools_list_gives_each_tool_a_json_schema(session: Session):
                 "description": "A run id from xpt_runs. Default: the latest run.",
             },
             "full": {"type": "boolean", "description": "Lift the change and length limits."},
+            "since": {
+                "type": "string",
+                "description": "The git ref to diff the changed code against. Default: the "
+                "merge base with the default branch, or HEAD.",
+            },
         },
         "additionalProperties": False,
         "required": ["id"],
@@ -165,6 +170,7 @@ def test_tools_list_gives_each_tool_a_json_schema(session: Session):
         "force",
         "verify",
         "run",
+        "since",
     }
     assert tools["xpt_failures"]["annotations"]["readOnlyHint"] is True
     assert tools["xpt_accept"]["annotations"]["readOnlyHint"] is False

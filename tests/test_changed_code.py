@@ -61,8 +61,8 @@ deleted file mode 100644
 
 def test_parse_reads_new_side_lines_and_removals():
     assert parse(DIFF) == [
-        Hunk("src/a.py", 5, 2, ("    rate = 0.1",), ("    rate = 0.2", "    rate += 0")),
-        Hunk("src/a.py", 10, 0, ("    a = 1", "    b = 2"), ()),
+        Hunk("src/a.py", 5, 2, ("    rate = 0.1",), ("    rate = 0.2", "    rate += 0"), 5),
+        Hunk("src/a.py", 10, 0, ("    a = 1", "    b = 2"), (), 9),
     ]
 
 

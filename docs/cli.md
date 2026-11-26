@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,coverage,run,mcp,env,api,probe} [options]
+xpt {failures,show,accept,reject,runs,flaky,affected,clean,init,convert,coverage,run,mcp,env,api,probe} [options]
 ```
 
 `python -m xpt` runs the same command.
@@ -13,7 +13,7 @@ xpt {failures,show,accept,reject,runs,flaky,clean,init,convert,coverage,run,mcp,
 | `--json` | all | Print one JSON object on stdout. See [JSON output](json.md). |
 | `--root ROOT` | all but `api` and `run` | The project root. Default `.`. |
 | `--run RUN` | `failures`, `show`, `accept`, `reject` | A run id from `xpt runs`. Default the latest run. |
-| `--since REF` | `show`, `accept`, `coverage` | The git ref to diff the changed code against. Default the merge base with the default branch, or `HEAD`. See [Changed code](#changed-code). |
+| `--since REF` | `show`, `accept`, `coverage`, `affected` | The git ref to diff the changed code against. Default the merge base with the default branch, or `HEAD`, and for `affected` the commit the map was built at. See [Changed code](#changed-code). |
 
 ## Commands
 
@@ -175,6 +175,39 @@ Asserts that are not an `==` comparison are left alone without a report. A file 
 |---|---|
 | `--dry-run` | Report what would change and write nothing. |
 
+### `xpt affected [-- COMMAND [ARG ...]]`
+
+List the tests that ran the code changed since `--since`, each with its reason, or run them. It reads the map that `pytest --xpt-map` builds from a full run in `.xpt/map.json`, and intersects it with `git diff`.
+
+```text
+$ pytest --xpt-map            # once, and again after a large change
+$ xpt affected
+2 tests ran the code changed since 1a2b3c4d5e6f, the map's commit:
+  tests/test_price.py::test_total  ran src/shop/price.py:apply_discount, which changed
+  tests/test_tax.py                new test file
+Next: xpt affected -- pytest
+$ xpt affected -- pytest -x
+```
+
+- A change inside a function body selects the tests that ran a line of that function. Comments and blank lines select nothing.
+- A change to code that runs at import, outside every function body (a constant, an import, a signature, a decorator, a class attribute), selects every test that ran a line of the file. When no test ran a line of it, but the map run imported it, every test runs, because a test may read a name from it.
+- A changed test file is selected whole, so new tests in it run too. A new file named `test_*.py` or `*_test.py` is always selected. A deleted file selects the tests that ran it.
+- The diff is against `--since REF`, by default the commit the map was built at. Staged, unstaged, and untracked files count. Hidden directories, `__pycache__`, and virtual environments don't.
+- `xpt affected -- COMMAND` prints the selection, runs the command from the root with the selected ids and test files added at the end, and exits with its code. `pytest` as the command runs this interpreter's `python -m pytest`. Don't pass test paths: the selection adds them. When nothing is selected it prints `Nothing to run.` and exits `0` without running, unless `--all-if-empty` is given.
+
+Every test runs, with the command given no ids, and the reason printed as `Run every test: <reason>.`, when:
+
+- there is no map,
+- the map is stale: a file it hashed changed in a way the diff doesn't show, because the diff's base is not the version the map was built from,
+- `conftest.py`, `pyproject.toml`, `setup.cfg`, `pytest.ini`, `tox.ini`, or any file that is not Python changed,
+- import-time code changed in a file no test ran a line of, or
+- git is not installed, or the root is not in a repository.
+
+| Option | Meaning |
+|---|---|
+| `--since REF` | The git ref to diff against. Default the commit the map was built at. |
+| `--all-if-empty` | With a command, run every test when the changes select none. |
+
 ### `xpt env [NAME]`
 
 Report the interpreter running xpt and what is wrong with the environment around it: modules that shadow the standard library or an installed package, and installed versions that drift from the lockfile. It prints one line for the interpreter and one per problem, and exits `1` when there is a problem. A clean environment prints one line:
@@ -306,7 +339,7 @@ Run a command and record the values at one line of a Python file in every Python
 
 | Code | Meaning |
 |---|---|
-| `0` | The command did what it was asked, or there was nothing to do. |
+| `0` | The command did what it was asked, or there was nothing to do. `xpt affected -- COMMAND` exits with the command's code instead. |
 | `1` | `failures` found failures, `flaky` found flaky call sites, `coverage` found changed lines no test ran or pytest failed, `accept` or `reject` left a requested call site stale, skipped, or suspect, the tests that `accept --verify` reran failed, an `init` check found a problem, or `env` found a problem or no module `NAME`. |
 | `2` | A usage error, such as `xpt run` without a command, an `xpt probe` line that can never run, an unknown id or run, no recorded run, a malformed record, a held `.xpt/accept.lock`, a `convert` path that is missing or outside the root, an `api` target that is not installed or not found, unpaired markers in `AGENTS.md`, a malformed `.mcp.json` with `init --mcp`, or `coverage` outside a git repository, with a command that traced no lines, or with a file that is not coverage.py data. The error is one line on stderr that says what to do next, and nothing is written. |
 
@@ -318,6 +351,8 @@ Run a command and record the values at one line of a Python file in every Python
   runs/<run>/<worker>.jsonl
   runs/<run>/source     the project source digest, for xpt flaky
   runs/<run>/<worker>.trace.json  with pytest --xpt-trace, the lines each failing test ran
+  map.json              with pytest --xpt-map, the lines every test ran, for xpt affected
+  map/<run>/<worker>.json  each process's part of the map while the session runs
   latest                the id of the newest complete run
   probes/<id>.jsonl     the hits of one xpt probe, the last five kept
   decisions.jsonl       rejections, one per line

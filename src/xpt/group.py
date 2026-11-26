@@ -13,11 +13,13 @@ from xpt.report import show
 from xpt.site import CallSite, SiteKey, Unlocatable, short_ids
 from xpt.value import Value, canonical
 
-GroupStatus = Literal["missing", "mismatch", "unsupported", "unlocatable", "conflict"]
+GroupStatus = Literal["missing", "mismatch", "unsupported", "returned", "unlocatable", "conflict"]
 
 ONE_EXPECT_PER_CASE = (
     " Give each case its own expect(), or pass key=case so one dict holds every case."
 )
+
+RETURNED = " Fix the code under test, or expect() the value it returns instead."
 
 T = TypeVar("T")
 
@@ -110,6 +112,8 @@ def _located(id: str, seen: list[tuple[CallSite, Observation]]) -> Group:
             _disagree("the expected argument's source text", "had", shown)
             + " The file changed during the run. Run the tests again.",
         )
+    if returned := sorted({o.detail for o in observations if o.status == "returned"}):
+        return made("returned", " ".join(returned) + RETURNED)
     if any(o.actual is None for o in observations):
         return made(
             "unsupported", " ".join(sorted({o.detail for o in observations if o.actual is None}))

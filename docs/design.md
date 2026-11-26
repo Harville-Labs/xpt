@@ -92,16 +92,18 @@ Value           # a serialized, typed value tree. Never code, never pickle.
   {"dict": {str: Value, ...}}                      # every key is a str
   {"dict": [[Value, Value], ...]}                  # any other keys
   {"module:Qualname": {field: Value, ...}}         # a constructor call; field "" is positional
+                                                   # and field "*" holds positional args as a tuple
   {"ref": "module:qualname"}                       # a module-level name such as torch.float32
 
 Observation     # one failed call of expect() in one run
   run: str                # run id
   test: str               # pytest node id, or the expect() caller's qualname outside pytest
   site: CallSite | Unlocatable  # an unlocatable site is shown but never accepted
-  status: "missing" | "mismatch" | "unsupported"
+  status: "missing" | "mismatch" | "unsupported" | "returned"
   expected: Value | None  # None when missing or unsupported
-  actual: Value | None    # None when unsupported or over the size cap
-  detail: str             # "" normally; the UnsupportedValue message, or "too large: N bytes, sha256 <hex>"
+  actual: Value | None    # None when unsupported or over the size cap; for returned, the return value
+  detail: str             # "" normally; the UnsupportedValue message, "too large: N bytes, sha256 <hex>",
+                          # or for returned, the failure message
   options: Options        # how the call compared; both values already have ignore and unordered applied
   key: Value | None       # the case's key= value, None for an unkeyed call
 
@@ -113,7 +115,7 @@ Options         # the comparison keywords of one expect() call
 Group           # every failed observation of one call site in a run, built at read time
   id: str | None          # short display id, None for an unlocatable site
   site: CallSite | Unlocatable
-  status: "missing" | "mismatch" | "unsupported" | "unlocatable" | "conflict"
+  status: "missing" | "mismatch" | "unsupported" | "returned" | "unlocatable" | "conflict"
   actuals: [Value]        # the distinct actual values, one when the calls agree
   expected: Value | None  # None when missing, or when the calls disagree on it
   tests: [str]            # every test that reached the site
@@ -178,6 +180,7 @@ One call site can run many times: in a loop, in a parametrized test, from a help
 - With `key=`, every observation stores the whole expected dict and, as its actual value, that dict with its own case replaced. Grouping merges them: the group's actual value is the expected dict with every failing case's entry set. Cases that passed record nothing, so their entries come through unchanged from the expected dict. The group is `missing` when every failing case had no entry, and `mismatch` otherwise. Two calls with the same key and different values conflict, and so does a site that mixes keyed and unkeyed calls.
 - Values are equal when `norm` says so, the same equality `diff` uses, so `1` and `1.0` agree.
 - Calls that disagree on `arg_sha` are a conflict too, because the file changed during the run. So are calls with equal actual values but different expected values, which happens when the expected argument depends on a parameter.
+- If any call of `expect.raises` returned instead of raising, the group is `returned` and cannot be accepted. Its detail holds each distinct failure message.
 - If any call recorded no actual value (unsupported, or over the size cap), the group is `unsupported` and cannot be accepted.
 - Unlocatable observations group by path, line, and reason. They are shown with status `unlocatable` and never accepted.
 
@@ -326,6 +329,23 @@ Arrays over 10,000 elements are written as `expect.digest(...)`, the same kind o
 
 Acceptance never runs code from the record. It builds source text from the `Value` tree. It never calls `eval`, `pickle`, or the observed object's `__repr__`.
 
+## Exceptions
+
+`expect.raises(fn, expected?)` treats an exception as a value. It calls `fn`, takes what it raised as the actual value, and goes through the same compare, record, and accept path as `expect()`. The call site's callee is `expect.raises` and its expected argument is the second positional or `expected=`, so identity, fingerprints, rewriting, and `pytest --expect-create` need nothing new.
+
+- **What is recorded.** The exact type and `args`, and `__notes__` when set. `serialize` records any `BaseException` that is not a dataclass or a registered class, wherever it appears in a value. `args` is the field `"*"`, a tuple whose items are written as positional arguments: `{"builtins:ValueError": {"*": {"tuple": ["bad"]}}}` is `ValueError("bad")`. The field's path step is `.args`, the attribute that holds them, so a diff reads `value.args[0]` and an ignore path is written the same way. The traceback, cause, context, and other attributes are left out. They hold addresses, line numbers, and paths that change from run to run, and none of them can be passed to a constructor.
+- **Comparison.** `equal` compares two exceptions whose class has no `__eq__` of its own by exact type, `args`, and notes, each with the same rules as any other value, so an `ExceptionGroup`'s children compare by value too. A class with its own `__eq__` keeps it. `subclass=True` accepts an instance of a subclass of the expected type. Before comparing, xpt rebuilds the caught exception's args and notes as the expected type, so a diff shows only args and notes, and accepting keeps the base type the test named.
+- **Writing.** The default form is a constructor call, `ParseError("bad", 3)`. At record time xpt calls the class with the exception's `args` and checks that it gets back the same type and `args`. When it doesn't, because the class's `__init__` takes other arguments, or when the exception has notes, the value is `{"xpt:expect.exception": {"": {"ref": "module:Type"}, "*": {"tuple": [...]}, "notes": [...]}}`, written `expect.exception(Type, *args, notes=[...])`. That helper builds the instance with `Type.__new__` and sets `args` and `__notes__` without calling `__init__`, which is enough because only type, args, and notes are compared. The constructor check runs the project's own class on the failure path only. Nothing from the record is ever called or evaluated.
+- **Did not raise.** A call that returns records status `returned`, with the return value as `actual`, the expected exception if any, and the failure message as `detail`. A `returned` group is never acceptable, because writing the return value as the expected exception would make a test that can never pass.
+- **What passes through.** Every `Exception` and `SystemExit` is caught. `KeyboardInterrupt`, `GeneratorExit`, pytest's outcome exceptions, and other `BaseException` subclasses pass through unless the expected value is an instance of their type. A failed `expect()` inside `fn` always passes through.
+
+Decisions on the questions issue #65 left open:
+
+- **Classes with custom `__init__` signatures** are written through `expect.exception(Type, *args)`, not as a `{"type": ..., "args": ...}` dict. The test still reads as one expression that builds an exception, it compares with the same rules, and `expect.raises` needs no second shape of expected value.
+- **`ExceptionGroup`** gets a tree of its children with no special case, because the children are part of its `args` and each one is recorded as an exception.
+- **A type the test file can't name** is skipped with a reason naming the import to add, the same rule as a dataclass. Writing a qualified name the file doesn't bind would leave a `NameError`.
+- **The context-manager form** (`with expect.raises() as caught:`) is left for later. Its expected argument would be the first positional, and the comparison would run in `__exit__`, whose frame points at the `with` statement rather than at a call. Both need their own locate and rewrite rules.
+
 ## Comparison options
 
 `ignore=`, `unordered=`, and `key=` let an agent keep volatile or order-free data out of an expectation without hand-editing the recorded value. `xpt.options.Options` holds `ignore`, `unordered`, and the tolerance for one call, and `options()` parses the keyword arguments where they enter.
@@ -442,9 +462,13 @@ from xpt import expect
 
 expect(actual)  # missing: fails, records
 expect(actual, expected)  # compares with ==, records on mismatch
+expect.raises(fn)  # calls fn; missing: fails, records what it raised
+expect.raises(fn, ValueError("bad"))  # compares type, args, and notes; records on mismatch
 ```
 
-Keyword-only arguments change how a call compares: `atol=`, `rtol=`, `ignore=`, `unordered=`, and `key=`. They stay in the source, so a reviewer can see them, and they are recorded with each observation, so review and accept compare the same way the test did.
+Keyword-only arguments change how a call compares: `atol=`, `rtol=`, `ignore=`, `unordered=`, and `key=`. They stay in the source, so a reviewer can see them, and they are recorded with each observation, so review and accept compare the same way the test did. `expect.raises` takes `subclass=` and `ignore=`.
+
+Recorded values may also use helpers reached through `expect`, so a file that imports `expect` can always name them: `expect.digest(...)`, `expect.with_extensions(...)`, and `expect.exception(Type, *args, notes=[...])`.
 
 `expect.output(capsys)` expects captured stdout and stderr, or a `CompletedProcess`, as lists of lines (see Expecting output).
 

@@ -263,6 +263,8 @@ def _detail(f: Failure, groups: dict[SiteKey, Group], lim: Limits) -> Lines:
             g = None if isinstance(site, Unlocatable) else groups.get(site.key)
             rejected = "  rejected" if g and g.rejected else ""
             lines = [f"  {(g.id if g else None) or '-'}  {g.status if g else o.status}{rejected}"]
+            if o.status == "returned":
+                return [*lines, f"  {cut(o.detail, lim.message)}"]
             note = [f"  {cut(o.detail, lim.message)}"] if o.detail else []
             if o.expected is not None and o.actual is not None:
                 return lines + _changes(o.options.diff(o.expected, o.actual), lim) + note

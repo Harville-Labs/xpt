@@ -4,7 +4,7 @@ import dataclasses
 import math
 from typing import Any
 
-from xpt import adapters, digest
+from xpt import adapters, digest, errors
 from xpt.digest import Digest
 from xpt.tolerance import EXACT, Tolerance
 
@@ -12,6 +12,7 @@ from xpt.tolerance import EXACT, Tolerance
 def equal(a: Any, b: Any, tol: Tolerance = EXACT) -> bool:
     """Python's ==, except that arrays and frames must match in type, shape, and dtype.
 
+    Exceptions that compare by identity are equal when their type, args, and notes are.
     NaN equals NaN, so a recorded float("nan") passes against a NaN result. `tol` lets
     floats and complex parts of `a`, the actual value, differ from `b`, the expected one.
 
@@ -22,6 +23,12 @@ def equal(a: Any, b: Any, tol: Tolerance = EXACT) -> bool:
         return digest.of(a) == b
     if isinstance(a, Digest):
         return digest.of(b) == a
+    if isinstance(a, BaseException) and isinstance(b, BaseException) and errors.plain(type(a)):
+        return (
+            type(a) is type(b)
+            and _item(a.args, b.args, tol)
+            and _item(errors.notes(a), errors.notes(b), tol)
+        )
     same = adapters.same(a, b, tol)
     if same is not None:
         return same

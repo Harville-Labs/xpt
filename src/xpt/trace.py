@@ -10,6 +10,8 @@ and traces only frames of project code.
 Lines of code that is not a function, a module or class body, run once at import, often
 outside any test. They are also kept as definitions, and a test counts the definitions of
 every file it ran a line in, so a changed constant or signature still shows.
+
+With `session=True` the tracer also keeps every line it saw in any context, for `xpt coverage`.
 """
 
 from __future__ import annotations
@@ -56,6 +58,9 @@ class Tracer:
     """Records the project lines that run, by context, while started."""
 
     root: Path
+    session: bool = False
+    _session: _Hits = field(default_factory=set)
+    _imported: frozenset[str] = frozenset()
     _context: _Hits = field(default_factory=set)
     _outside: _Hits = field(default_factory=set)
     _definitions: _Hits = field(default_factory=set)
@@ -80,6 +85,8 @@ class Tracer:
                 )
             sys.settrace(self._call)
             threading.settrace(self._call)
+        if self.session:
+            self._imported = self._loaded()
         self._context = self._outside
         self._started = True
 
@@ -108,6 +115,23 @@ class Tracer:
     def definitions(self) -> dict[str, frozenset[int]]:
         """The lines module and class bodies ran, in any context."""
         return self._lines(self._definitions)
+
+    def everything(self) -> dict[str, frozenset[int]]:
+        """Every line that ran while started, with `session`, in any context."""
+        return self._lines(self._session)
+
+    def imported(self) -> frozenset[str]:
+        """With `session`, the project files whose modules were imported before `start`, so
+        their module and class bodies ran untraced."""
+        return self._imported
+
+    def _loaded(self) -> frozenset[str]:
+        found = set()
+        for module in list(sys.modules.values()):
+            filename = getattr(module, "__file__", None)
+            if isinstance(filename, str) and (path := self._path(filename)) is not None:
+                found.add(path)
+        return frozenset(found)
 
     def _lines(self, hits: _Hits) -> dict[str, frozenset[int]]:
         found: dict[str, set[int]] = defaultdict(set)
@@ -160,6 +184,8 @@ class Tracer:
 
     def _line(self, code: CodeType, line: int) -> Any:
         self._context.add((code.co_filename, line))
+        if self.session:
+            self._session.add((code.co_filename, line))
         if code in self._bodies:
             self._definitions.add((code.co_filename, line))
         return _MONITORING.DISABLE
@@ -172,7 +198,10 @@ class Tracer:
 
     def _local_line(self, frame: FrameType, event: str, arg: object) -> Any:
         if event == "line":
-            self._context.add((frame.f_code.co_filename, frame.f_lineno))
+            hit = (frame.f_code.co_filename, frame.f_lineno)
+            self._context.add(hit)
+            if self.session:
+                self._session.add(hit)
         return self._local_line
 
     def _body_line(self, frame: FrameType, event: str, arg: object) -> Any:
@@ -180,6 +209,8 @@ class Tracer:
             hit = (frame.f_code.co_filename, frame.f_lineno)
             self._context.add(hit)
             self._definitions.add(hit)
+            if self.session:
+                self._session.add(hit)
         return self._body_line
 
 

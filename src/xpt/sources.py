@@ -1,4 +1,5 @@
-"""A digest of a project's Python source, so two runs can tell whether the code changed."""
+"""Which files are the project's own Python source, and a digest of them, so two runs can tell
+whether the code changed."""
 
 from __future__ import annotations
 
@@ -28,14 +29,37 @@ def digest(root: Path) -> str:
 
 def _files(root: Path) -> Iterator[tuple[str, Path]]:
     for directory, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if _searched(Path(directory, d))]
+        dirs[:] = [d for d in dirs if searched(Path(directory, d))]
         for name in files:
             if name.endswith(".py"):
                 path = Path(directory, name)
                 yield path.relative_to(root).as_posix(), path
 
 
-def _searched(directory: Path) -> bool:
+def project_file(root: Path, filename: str) -> str | None:
+    """`filename` as a path relative to `root`, when it is a `.py` file of the project.
+
+    It is None outside `root` and under a directory `digest` skips, such as a virtual
+    environment or `site-packages`, so installed packages never count as the project.
+    """
+    path = Path(filename)
+    if path.suffix != ".py" or not path.is_absolute():
+        return None
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError:
+        try:
+            parts = Path(os.path.realpath(path)).relative_to(os.path.realpath(root)).parts
+        except ValueError:
+            return None
+    for depth in range(1, len(parts)):
+        if not searched(root.joinpath(*parts[:depth])):
+            return None
+    return "/".join(parts)
+
+
+def searched(directory: Path) -> bool:
+    """Whether a directory holds project source: not hidden, not a cache, not a venv."""
     name = directory.name
     if name.startswith(".") or name in SKIPPED_DIRS:
         return False

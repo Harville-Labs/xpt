@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from xpt import decisions, flaky, frames, record, report
+from xpt import decisions, flaky, frames, record, report, trace
 from xpt.accept import Accepted, after_session
 from xpt.deterministic import Pinned, deterministic
 from xpt.diff import diff
@@ -22,6 +22,8 @@ from xpt.value import Value
 MODES = ("xpt", "pytest")
 _COMPARED = pytest.StashKey[tuple[Value, Value] | None]()
 _MODE = pytest.StashKey[str]()
+_TRACER = pytest.StashKey[trace.Tracer]()
+_TRACED = pytest.StashKey[dict[str, trace.Lines]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -43,6 +45,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--expect-no-record",
         action="store_true",
         help="Do not record failing expect() calls under .xpt/.",
+    )
+    group.addoption(
+        "--xpt-trace",
+        action="store_true",
+        help="Record the project lines each failing test ran, so xpt show and xpt accept can "
+        "print the changed code it ran.",
     )
     group.addoption(
         "--xpt-report",
@@ -74,6 +82,8 @@ def pytest_configure(config: pytest.Config) -> None:
     record.recorder.configure(
         config.rootpath, run, worker, record=not config.getoption("expect_no_record")
     )
+    if config.getoption("xpt_trace"):
+        _start_trace(config)
     mode = _mode(config)
     config.stash[_MODE] = mode
     config.stash[_COMPARED] = None
@@ -84,6 +94,29 @@ def pytest_configure(config: pytest.Config) -> None:
         AgentReporter.install(config, config.getoption("xpt_json"))
     elif config.getoption("xpt_json"):
         raise pytest.UsageError(f"--xpt-json needs the xpt report, but {reason}.")
+
+
+def _start_trace(config: pytest.Config) -> None:
+    tracer = trace.Tracer(config.rootpath)
+    try:
+        tracer.start()
+    except trace.TraceError as error:
+        raise pytest.UsageError(f"--xpt-trace can't start: {error}") from None
+    config.stash[_TRACER] = tracer
+    config.stash[_TRACED] = {}
+    config.add_cleanup(tracer.stop)
+
+
+def _finish_trace(config: pytest.Config) -> None:
+    """Stop tracing and store the lines of each test that recorded an observation."""
+    tracer = config.stash.get(_TRACER, None)
+    if tracer is None:
+        return
+    tracer.stop()
+    traced = config.stash[_TRACED]
+    rec = record.recorder
+    if traced and rec.enabled:
+        trace.write(rec.root, rec.run, rec.worker, traced, tracer.definitions())
 
 
 def _groups(root: Path, run: str) -> tuple[Group, ...]:
@@ -109,7 +142,11 @@ def _check_writes(config: pytest.Config) -> None:
             "--expect-accept needs call site ids, as in --expect-accept=b211,ee17. "
             "The report prints each id beside its diff."
         )
-    asked = {"--expect-create": config.getoption("expect_create"), "--expect-accept": accepting}
+    asked = {
+        "--expect-create": config.getoption("expect_create"),
+        "--expect-accept": accepting,
+        "--xpt-trace": config.getoption("xpt_trace"),
+    }
     for flag in (f for f, on in asked.items() if on):
         if config.getoption("expect_no_record"):
             raise pytest.UsageError(f"{flag} needs recording. Drop --expect-no-record.")
@@ -134,10 +171,18 @@ def pytest_configure_node(node: Any) -> None:
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object]:
     record.recorder.test = item.nodeid
+    tracer = item.config.stash.get(_TRACER, None)
+    if tracer is not None:
+        tracer.begin()
     try:
         return (yield)
     finally:
         record.recorder.test = None
+        if tracer is not None:
+            recorded = item.nodeid in record.recorder.tests
+            lines = tracer.end(keep=recorded)
+            if recorded:
+                item.config.stash[_TRACED][item.nodeid] = lines
 
 
 @pytest.fixture
@@ -240,6 +285,7 @@ def _detail(
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
     config = session.config
+    _finish_trace(config)
     if hasattr(config, "workerinput"):
         return
     record.recorder.finish(source=True)

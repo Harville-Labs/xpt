@@ -84,6 +84,7 @@ class Recorder:
     enabled: bool
     managed: bool = False
     test: str | None = None
+    tests: set[str] = field(default_factory=set, repr=False)
     _file: TextIO | None = field(default=None, repr=False)
 
     @classmethod
@@ -97,10 +98,12 @@ class Recorder:
         self.enabled = record and environment().record
         self.managed = True
         self.test = None
+        self.tests = set()
 
     def record(self, observation: Observation) -> None:
         if not self.enabled:
             return
+        self.tests.add(observation.test)
         line = _encode(observation)
         size = len(line.encode("utf-8"))
         if size > MAX_RECORD_BYTES:
@@ -160,7 +163,7 @@ def load_run(root: Path, run: str | None = None) -> list[Observation]:
         run = latest_run(root)
         if not (directory / "runs" / run).is_dir():
             return []
-    run_dir = directory / "runs" / _run_id(run)
+    run_dir = directory / "runs" / run_id(run)
     if not run_dir.is_dir():
         raise RecordError(f"there is no run {run} in {(directory / 'runs').as_posix()}.")
     return [
@@ -170,7 +173,7 @@ def load_run(root: Path, run: str | None = None) -> list[Observation]:
 
 def source_digest(root: Path, run: str) -> str | None:
     """The project source digest stored with a run, None when the run has none."""
-    path = root / DIRECTORY / "runs" / _run_id(run) / SOURCE
+    path = root / DIRECTORY / "runs" / run_id(run) / SOURCE
     try:
         text = path.read_text(encoding="utf-8").strip()
     except OSError:
@@ -188,7 +191,7 @@ def latest_run(root: Path) -> str:
     latest = root / DIRECTORY / "latest"
     if not latest.is_file():
         raise RecordError(f"{latest.as_posix()} does not exist. Run the tests to record a run.")
-    return _run_id(latest.read_text(encoding="utf-8").strip())
+    return run_id(latest.read_text(encoding="utf-8").strip())
 
 
 def run_ids(root: Path) -> list[str]:
@@ -197,7 +200,7 @@ def run_ids(root: Path) -> list[str]:
     return sorted(p.name for p in runs.glob("*") if _RUN_ID.fullmatch(p.name) and p.is_dir())
 
 
-def _run_id(text: str) -> str:
+def run_id(text: str) -> str:
     if not _RUN_ID.fullmatch(text):
         raise RecordError(f"{text!r} is not a run id. Run ids look like 20260101T120000-ab12.")
     return text
